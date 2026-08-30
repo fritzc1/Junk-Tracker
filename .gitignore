@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+
+# Local MongoDB installation (vendored binaries) and local database data
+MongoDB/
+
+# Generated / personal spreadsheet files
+output.xlsx
+Storage Boxes Contents 2025 - APP IMPORT COPY.xlsx
+
+# OS junk
+Thumbs.db
+Desktop.ini
+.DS_Store
