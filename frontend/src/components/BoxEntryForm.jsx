@@ -164,7 +164,9 @@ const BoxEntryForm = ({ mode = 'create', id, onSaved, allowNewLocation = false, 
   const boxIdOptions = mode === 'edit' && ownBoxId
     ? existingBoxIds.filter(id => id !== ownBoxId)
     : existingBoxIds;
-  // Case-sensitive exact match mirrors the backend's unique index behavior.
+  // Exact match against existing IDs — both sides are in canonical uppercase
+  // form (input is auto-uppercased below; stored values are normalized by the
+  // backend), so this mirrors the backend's case-insensitive unique index.
   const isDuplicate = trimmedBoxId !== '' && boxIdOptions.includes(trimmedBoxId);
 
   const getBoxIdHelperText = () => {
@@ -212,8 +214,9 @@ const BoxEntryForm = ({ mode = 'create', id, onSaved, allowNewLocation = false, 
         </Alert>
       )}
 
-      {/* Box ID — freeSolo autocomplete: type freely; the dropdown lists
-          existing box IDs and narrows as you type, flagging exact duplicates */}
+      {/* Box ID — freeSolo autocomplete: input is auto-uppercased (box IDs are
+          stored in canonical uppercase form); the dropdown lists existing box
+          IDs and narrows as you type, flagging exact duplicates */}
       <Autocomplete
         fullWidth
         freeSolo
@@ -223,7 +226,9 @@ const BoxEntryForm = ({ mode = 'create', id, onSaved, allowNewLocation = false, 
         // matches the controlled `value`. onChange only fires when an option is
         // selected / Enter commits, so we must track every keystroke via
         // onInputChange to keep boxIdValue (and duplicate detection) in sync.
-        onInputChange={(e, newInputValue) => setBoxIdValue(newInputValue ?? '')}
+        // Auto-uppercase as the user types so the field visibly enforces the
+        // canonical form and duplicate detection works against stored values.
+        onInputChange={(e, newInputValue) => setBoxIdValue((newInputValue ?? '').toUpperCase())}
         onChange={(e, newValue) => {
           if (typeof newValue === 'string') setBoxIdValue(newValue);
         }}
@@ -235,7 +240,9 @@ const BoxEntryForm = ({ mode = 'create', id, onSaved, allowNewLocation = false, 
         }}
         noOptionsText={trimmedBoxId ? 'No matching box IDs — this ID is available' : 'No boxes with an ID yet'}
         renderOption={(props, option) => {
-          const isExact = option === trimmedBoxId; // case-sensitive, mirrors backend
+          // Both sides are canonical uppercase (input auto-uppercased above), so a
+          // plain equality check matches the backend's case-insensitive uniqueness.
+          const isExact = option === trimmedBoxId;
           return (
             <li {...props}>
               <Typography

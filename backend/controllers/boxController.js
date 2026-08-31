@@ -1,5 +1,6 @@
 const Box = require('../models/Box');
 const Item = require('../models/Item');
+const { normalizeBoxId } = require('../utils/boxId');
 
 // @desc    Create a new box
 // @route   POST /api/boxes
@@ -8,11 +9,15 @@ const createBox = async (req, res) => {
   try {
     const { boxId, locationId } = req.body;
 
+    // Normalize to the canonical stored form (trimmed + uppercase) so identity
+    // is case-insensitive: "a06" and "A06" are the same box.
+    const normalizedBoxId = normalizeBoxId(boxId);
+
     // Check for duplicate boxId if provided
-    if (boxId && String(boxId).trim()) {
-      const existing = await Box.findOne({ boxId: String(boxId).trim() });
+    if (normalizedBoxId) {
+      const existing = await Box.findOne({ boxId: normalizedBoxId });
       if (existing) {
-        console.log(`[Box] Duplicate rejected: "${String(boxId).trim()}"`);
+        console.log(`[Box] Duplicate rejected: "${normalizedBoxId}"`);
         return res.status(400).json({
           success: false,
           error: 'A box with this ID already exists.'
@@ -21,7 +26,7 @@ const createBox = async (req, res) => {
     }
 
     const box = await Box.create({
-      boxId: (boxId && String(boxId).trim()) || undefined,
+      boxId: normalizedBoxId || undefined,
       locationId: locationId || null
     });
 
@@ -186,8 +191,10 @@ const updateBox = async (req, res) => {
       });
     }
 
-    // Check for duplicate boxId if changing
-    const newBoxId = boxId !== undefined ? String(boxId || '').trim() : box.boxId;
+    // Check for duplicate boxId if changing. Normalize to the canonical form
+    // (trimmed + uppercase); an unchanged ID is never flagged as a duplicate
+    // of itself because existing values are already stored in this form.
+    const newBoxId = boxId !== undefined ? normalizeBoxId(boxId) : (box.boxId || '');
     if (newBoxId && newBoxId !== box.boxId) {
       const existing = await Box.findOne({ boxId: newBoxId, _id: { $ne: req.params.id } });
       if (existing) {

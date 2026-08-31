@@ -26,8 +26,14 @@ const boxSchema = new mongoose.Schema({
   }
 });
 
-// Sparse unique index on boxId (allows multiple null/empty values)
-boxSchema.index({ boxId: 1 }, { sparse: true });
+// Sparse UNIQUE case-insensitive index on boxId (allows multiple null/empty
+// values). Box IDs are stored in canonical uppercase form (see utils/boxId.js);
+// the collation makes uniqueness case-insensitive as defense-in-depth, so a
+// stray "a06" is rejected when "A06" exists instead of creating a twin box.
+boxSchema.index(
+  { boxId: 1 },
+  { sparse: true, unique: true, collation: { locale: 'en', strength: 2 } }
+);
 
 // Update the updatedAt field before saving
 boxSchema.pre('save', function (next) {

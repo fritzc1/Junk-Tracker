@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const multer = require('multer');
 const XLSX = require('xlsx');
+const { normalizeBoxId } = require('../utils/boxId');
 const {
   createItem,
   getItems,
@@ -286,7 +287,9 @@ router.post('/import', upload.single('file'), async (req, res) => {
 
     if (boxIdColumnName) {
       for (const record of records) {
-        const boxIdValue = String(record[boxIdColumnName] || '').trim();
+        // Normalize to the canonical form (trimmed + uppercase) so an imported
+        // "a06" matches/creates the same box as "A06".
+        const boxIdValue = normalizeBoxId(record[boxIdColumnName]);
         if (!boxIdValue) continue;
         if (boxKeyMap.has(boxIdValue)) continue;
 
@@ -329,7 +332,8 @@ router.post('/import', upload.single('file'), async (req, res) => {
 
       let boxIdRef = null;
       if (boxIdColumnName) {
-        const boxIdValue = String(record[boxIdColumnName] || '').trim();
+        // Same normalization as the upsert loop above — boxKeyMap is keyed by canonical IDs.
+        const boxIdValue = normalizeBoxId(record[boxIdColumnName]);
         if (boxIdValue && boxKeyMap.has(boxIdValue)) {
           boxIdRef = boxKeyMap.get(boxIdValue);
         }
