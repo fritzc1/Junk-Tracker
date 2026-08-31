@@ -43,6 +43,50 @@ const LOCATION_CANDIDATES = ['Location'];
 const SUB_LOCATION_CANDIDATES = ['Sub-Location / Shelf Number', 'Sub-Location', 'Shelf Number'];
 const BOX_ID_CANDIDATES = ['Box ID', 'Box Id', 'box id'];
 const DESCRIPTION_CANDIDATES = ['Item Description', 'Description', 'Contents List', 'Contents', 'Items'];
+const TAGS_CANDIDATES = ['Tags', 'Tag'];
+const CREATED_CANDIDATES = ['Created', 'Date Created', 'Creation Date'];
+const MODIFIED_CANDIDATES = ['Last Modified', 'Modified', 'Updated'];
+
+// Lenient date parser for imported values. Handles Excel numeric serials,
+// Date instances, ISO 8601 strings and common US formats (M/D/YYYY[ HH:MM[:SS][ AM/PM]]).
+// Returns null when the value is empty or unparseable so callers can fall back to defaults.
+const parseImportDate = (value) => {
+  if (value === undefined || value === null) return null;
+
+  // Excel numeric serial date (days since 1899-12-30)
+  if (typeof value === 'number' && isFinite(value)) {
+    const ms = Math.round((value - 25569) * 86400 * 1000);
+    return new Date(ms);
+  }
+
+  if (value instanceof Date) {
+    return isNaN(value.getTime()) ? null : value;
+  }
+
+  const str = String(value).trim();
+  if (!str) return null;
+
+  // ISO 8601 or other formats JS can parse directly
+  let d = new Date(str);
+  if (!isNaN(d.getTime())) return d;
+
+  // US format: M/D/YYYY[ HH:MM[:SS][ AM/PM]]
+  const m = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*([AaPp]\.?[Mm]\.?)?)?$/);
+  if (m) {
+    let hour = m[4] !== undefined ? parseInt(m[4], 10) : 0;
+    const minute = m[5] !== undefined ? parseInt(m[5], 10) : 0;
+    const second = m[6] !== undefined ? parseInt(m[6], 10) : 0;
+    if (m[7]) {
+      const isPM = m[7].toLowerCase().startsWith('p');
+      if (isPM && hour < 12) hour += 12;
+      if (!isPM && hour === 12) hour = 0;
+    }
+    d = new Date(Date.UTC(parseInt(m[3], 10), parseInt(m[1], 10) - 1, parseInt(m[2], 10), hour, minute, second));
+    if (!isNaN(d.getTime())) return d;
+  }
+
+  return null;
+};
 
 // @route   POST /api/items/import/preview
 // @desc    Preview file columns without importing (for column mapping UI)
@@ -87,7 +131,10 @@ router.post('/import/preview', upload.single('file'), async (req, res) => {
         locationColumn: findCandidate(LOCATION_CANDIDATES),
         subLocationColumn: findCandidate(SUB_LOCATION_CANDIDATES),
         boxIdColumn: findCandidate(BOX_ID_CANDIDATES),
-        descriptionColumn: findCandidate(DESCRIPTION_CANDIDATES)
+        descriptionColumn: findCandidate(DESCRIPTION_CANDIDATES),
+        tagsColumn: findCandidate(TAGS_CANDIDATES),
+        createdColumn: findCandidate(CREATED_CANDIDATES),
+        modifiedColumn: findCandidate(MODIFIED_CANDIDATES)
       }
     });
   } catch (error) {
@@ -157,13 +204,47 @@ router.post('/import', upload.single('file'), async (req, res) => {
     const subLocationColumnName = mapping.subLocationColumn || findCandidate(SUB_LOCATION_CANDIDATES);
     const boxIdColumnName = mapping.boxIdColumn || findCandidate(BOX_ID_CANDIDATES);
     const descriptionColumnName = mapping.descriptionColumn || findCandidate(DESCRIPTION_CANDIDATES);
+    const tagsColumnName = mapping.tagsColumn || findCandidate(TAGS_CANDIDATES);
+    const createdColumnName = mapping.createdColumn || findCandidate(CREATED_CANDIDATES);
+    const modifiedColumnName = mapping.modifiedColumn || findCandidate(MODIFIED_CANDIDATES);
 
     console.log('[IMPORT] Mapped columns:', {
       location: locationColumnName,
       subLocation: subLocationColumnName,
       boxId: boxIdColumnName,
-      description: descriptionColumnName
+      description: descriptionColumnName,
+      tags: tagsColumnName,
+      created: createdColumnName,
+      modified: modifiedColumnName
     });
+
+    // --- Upsert Tags from the tags column (comma-separated names) ---
+    const Tag = require('../models/Tag');
+    const tagIdMap = new Map(); // Maps normalized tag name -> Tag _id
+
+    if (tagsColumnName) {
+      for (const record of records) {
+        const rawTags = String(record[tagsColumnName] || '');
+        for (const part of rawTags.split(',')) {
+          const name = part.trim().toLowerCase();
+          if (!name || tagIdMap.has(name)) continue;
+
+          let tag = await Tag.findOne({ name });
+          if (!tag) {
+            try {
+              tag = await Tag.create({ name });
+              console.log(`[IMPORT] Created tag: "${name}"`);
+            } catch (e) {
+              // Likely a race on the unique index — re-fetch
+              tag = await Tag.findOne({ name });
+            }
+          }
+          if (tag) tagIdMap.set(name, tag._id);
+        }
+      }
+    }
+
+    console.log('[IMPORT] Tags resolved:', tagIdMap.size);
 
     // --- Create/update Locations from the location + sub-location columns ---
     const locationMap = new Map(); // Maps "name|subLoc" -> Location _id
@@ -274,11 +355,35 @@ router.post('/import', upload.single('file'), async (req, res) => {
         }
       }
 
-      itemsToCreate.push({
+      // Tags for this record (comma-separated names -> resolved tag IDs)
+      let tags = [];
+      if (tagsColumnName && tagIdMap.size > 0) {
+        const rawTags = String(record[tagsColumnName] || '');
+        for (const part of rawTags.split(',')) {
+          const name = part.trim().toLowerCase();
+          if (!name) continue;
+          const id = tagIdMap.get(name);
+          if (id && !tags.includes(id)) tags.push(id);
+        }
+      }
+
+      // Imported timestamps — omit when unparseable so schema defaults apply
+      const doc = {
         description,
         boxId: boxIdRef,
-        locationId: locationIdRef
-      });
+        locationId: locationIdRef,
+        tags
+      };
+      if (createdColumnName) {
+        const createdDate = parseImportDate(record[createdColumnName]);
+        if (createdDate) doc.createdAt = createdDate;
+      }
+      if (modifiedColumnName) {
+        const modifiedDate = parseImportDate(record[modifiedColumnName]);
+        if (modifiedDate) doc.updatedAt = modifiedDate;
+      }
+
+      itemsToCreate.push(doc);
     }
 
     console.log('[IMPORT] Boxes created/updated:', boxKeyMap.size);

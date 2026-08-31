@@ -259,8 +259,9 @@ const buildExportRow = (item) => {
     'Item Description': String(item.description || ''),
     'Box ID': resolveBoxId(item),
     'Tags': (item.tags || []).map(t => t.name).join(', '),
-    'Created': item.createdAt ? new Date(item.createdAt).toLocaleDateString() : '',
-    'Last Modified': item.updatedAt ? new Date(item.updatedAt).toLocaleString() : ''
+    // ISO 8601 so the import parser can round-trip dates deterministically
+    'Created': item.createdAt ? new Date(item.createdAt).toISOString() : '',
+    'Last Modified': item.updatedAt ? new Date(item.updatedAt).toISOString() : ''
   };
 };
 

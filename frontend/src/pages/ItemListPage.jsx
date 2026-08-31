@@ -156,6 +156,9 @@ const ItemListPage = () => {
   const [mappingSubLocationCol, setMappingSubLocationCol] = useState('');
   const [mappingBoxIdCol, setMappingBoxIdCol] = useState('');
   const [mappingDescriptionCol, setMappingDescriptionCol] = useState('');
+  const [mappingTagsCol, setMappingTagsCol] = useState('');
+  const [mappingCreatedCol, setMappingCreatedCol] = useState('');
+  const [mappingModifiedCol, setMappingModifiedCol] = useState('');
   const [importing, setImporting] = useState(false);
 
   // Column sort state
@@ -265,6 +268,9 @@ const ItemListPage = () => {
         setMappingSubLocationCol(suggested.subLocationColumn || '');
         setMappingBoxIdCol(suggested.boxIdColumn || '');
         setMappingDescriptionCol(suggested.descriptionColumn || '');
+        setMappingTagsCol(suggested.tagsColumn || '');
+        setMappingCreatedCol(suggested.createdColumn || '');
+        setMappingModifiedCol(suggested.modifiedColumn || '');
         setImportDialogOpen(true);
       } else {
         setError(result.error || 'Failed to preview file');
@@ -289,7 +295,10 @@ const ItemListPage = () => {
         locationColumn: mappingLocationCol || null,
         subLocationColumn: mappingSubLocationCol || null,
         boxIdColumn: mappingBoxIdCol || null,
-        descriptionColumn: mappingDescriptionCol || null
+        descriptionColumn: mappingDescriptionCol || null,
+        tagsColumn: mappingTagsCol || null,
+        createdColumn: mappingCreatedCol || null,
+        modifiedColumn: mappingModifiedCol || null
       }));
 
       const response = await fetch('/api/items/import', {
@@ -323,6 +332,9 @@ const ItemListPage = () => {
     setMappingSubLocationCol('');
     setMappingBoxIdCol('');
     setMappingDescriptionCol('');
+    setMappingTagsCol('');
+    setMappingCreatedCol('');
+    setMappingModifiedCol('');
   };
 
   const handleSort = (fieldKey) => {
@@ -1223,8 +1235,59 @@ const ItemListPage = () => {
             </FormControl>
           </Box>
 
+          <Box sx={{ mb: 2 }}>
+            <Typography variant="subtitle2" gutterBottom>Tags Column</Typography>
+            <FormControl fullWidth size="small">
+              <InputLabel>Choose column</InputLabel>
+              <Select
+                value={mappingTagsCol}
+                label="Choose column"
+                onChange={(e) => setMappingTagsCol(e.target.value)}
+              >
+                <MenuItem value="">— None —</MenuItem>
+                {importColumns.map(col => (
+                  <MenuItem key={`tags-${col}`} value={col}>{col}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Box>
+
+          <Box sx={{ mb: 2 }}>
+            <Typography variant="subtitle2" gutterBottom>Created Column</Typography>
+            <FormControl fullWidth size="small">
+              <InputLabel>Choose column</InputLabel>
+              <Select
+                value={mappingCreatedCol}
+                label="Choose column"
+                onChange={(e) => setMappingCreatedCol(e.target.value)}
+              >
+                <MenuItem value="">— None —</MenuItem>
+                {importColumns.map(col => (
+                  <MenuItem key={`created-${col}`} value={col}>{col}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Box>
+
+          <Box sx={{ mb: 2 }}>
+            <Typography variant="subtitle2" gutterBottom>Last Modified Column</Typography>
+            <FormControl fullWidth size="small">
+              <InputLabel>Choose column</InputLabel>
+              <Select
+                value={mappingModifiedCol}
+                label="Choose column"
+                onChange={(e) => setMappingModifiedCol(e.target.value)}
+              >
+                <MenuItem value="">— None —</MenuItem>
+                {importColumns.map(col => (
+                  <MenuItem key={`modified-${col}`} value={col}>{col}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Box>
+
           <Typography variant="caption" color="text.secondary">
-            Location + Sub-Location together uniquely identify a location. Box ID identifies boxes. All other columns in the file will be ignored.
+            Location + Sub-Location together uniquely identify a location. Box ID identifies boxes. Tags are comma-separated names (missing tags are created automatically). Unparseable dates fall back to the import time. All other columns in the file will be ignored.
           </Typography>
         </DialogContent>
         <DialogActions>
