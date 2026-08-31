@@ -8,6 +8,8 @@ import BoxEntryPage from './pages/BoxEntryPage';
 import LocationListPage from './pages/LocationListPage';
 import LocationEntryPage from './pages/LocationEntryPage';
 import TagListPage from './pages/TagListPage';
+import SettingsPage from './pages/SettingsPage';
+import NavBar from './components/NavBar';
 import ErrorBoundary from './components/ErrorBoundary';
 
 const theme = createTheme({
@@ -33,6 +35,7 @@ function App() {
       <CssBaseline />
       <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <ErrorBoundary>
+          <NavBar />
           <Routes>
             <Route path="/" element={<ItemListPage />} />
             <Route path="/entry" element={<ItemEntryPage mode="create" />} />
@@ -45,6 +48,7 @@ function App() {
             <Route path="/location-entry" element={<LocationEntryPage mode="create" />} />
             <Route path="/location-edit/:id" element={<LocationEntryPage mode="edit" />} />
             <Route path="/tags" element={<TagListPage />} />
+            <Route path="/settings" element={<SettingsPage />} />
           </Routes>
         </ErrorBoundary>
       </Router>

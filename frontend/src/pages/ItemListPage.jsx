@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Autocomplete,
@@ -13,11 +13,7 @@ import {
   DialogContent,
   DialogContentText,
   DialogTitle,
-  FormControl,
-  InputLabel,
-  MenuItem,
   Paper,
-  Select,
   Table,
   TableBody,
   TableCell,
@@ -35,13 +31,8 @@ import {
   ArrowDownward as ArrowDownwardIcon,
   ArrowUpward as ArrowUpwardIcon,
   Delete as DeleteIcon,
-  Download as DownloadIcon,
   Edit as EditIcon,
-  Label as LabelIcon,
-  LocationOn as LocationOnIcon,
-  Storage as StorageIcon,
   Save as SaveIcon,
-  Upload as UploadIcon,
 } from '@mui/icons-material';
 import { api } from '../services/api';
 import SearchBar from '../components/SearchBar';
@@ -143,25 +134,8 @@ const ItemListPage = () => {
   const [bulkEditLocationId, setBulkEditLocationId] = useState(''); // prefilled shared direct location id ('' when none/various)
   const [bulkEditLocationTouched, setBulkEditLocationTouched] = useState(false);
 
-  const [clearDialogOpen, setClearDialogOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-
-  // Import dialog state
-  const fileInputRef = useRef(null);
-  const [exportFormat, setExportFormat] = useState('csv');
-  const [importDialogOpen, setImportDialogOpen] = useState(false);
-  const [importFile, setImportFile] = useState(null);
-  const [importColumns, setImportColumns] = useState([]);
-  const [importRowCount, setImportRowCount] = useState(0);
-  const [mappingLocationCol, setMappingLocationCol] = useState('');
-  const [mappingSubLocationCol, setMappingSubLocationCol] = useState('');
-  const [mappingBoxIdCol, setMappingBoxIdCol] = useState('');
-  const [mappingDescriptionCol, setMappingDescriptionCol] = useState('');
-  const [mappingTagsCol, setMappingTagsCol] = useState('');
-  const [mappingCreatedCol, setMappingCreatedCol] = useState('');
-  const [mappingModifiedCol, setMappingModifiedCol] = useState('');
-  const [importing, setImporting] = useState(false);
 
   // Column sort state
   const [sortConfig, setSortConfig] = useState({ field: null, direction: 'asc' });
@@ -222,121 +196,6 @@ const ItemListPage = () => {
     } finally {
       setLoading(false);
     }
-  };
-
-  // Export to CSV or Excel
-  const handleExport = async () => {
-    try {
-      const endpoint = exportFormat === 'xlsx' ? '/api/items/export/xlsx' : '/api/items/export';
-      const response = await fetch(endpoint);
-      if (!response.ok) throw new Error('Failed to export');
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = exportFormat === 'xlsx' ? 'items.xlsx' : 'items.csv';
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
-    } catch (err) {
-      setError('Error exporting: ' + err.message);
-    }
-  };
-
-  // Step 1: Upload file and preview columns
-  const handleImportFileSelect = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    setImportFile(file);
-    try {
-      setLoading(true);
-      const formData = new FormData();
-      formData.append('file', file);
-
-      const response = await fetch('/api/items/import/preview', {
-        method: 'POST',
-        body: formData,
-      });
-
-      const result = await response.json();
-      if (result.success) {
-        setImportColumns(result.columns);
-        setImportRowCount(result.rowCount);
-        // Pre-fill mapping from backend auto-detection
-        const suggested = result.suggestedMapping || {};
-        setMappingLocationCol(suggested.locationColumn || '');
-        setMappingSubLocationCol(suggested.subLocationColumn || '');
-        setMappingBoxIdCol(suggested.boxIdColumn || '');
-        setMappingDescriptionCol(suggested.descriptionColumn || '');
-        setMappingTagsCol(suggested.tagsColumn || '');
-        setMappingCreatedCol(suggested.createdColumn || '');
-        setMappingModifiedCol(suggested.modifiedColumn || '');
-        setImportDialogOpen(true);
-      } else {
-        setError(result.error || 'Failed to preview file');
-      }
-    } catch (err) {
-      setError('Error reading file: ' + err.message);
-    } finally {
-      setLoading(false);
-      e.target.value = '';
-    }
-  };
-
-  // Step 2: Execute import with mapping
-  const handleImportExecute = async () => {
-    if (!importFile) return;
-
-    try {
-      setImporting(true);
-      const formData = new FormData();
-      formData.append('file', importFile);
-      formData.append('mapping', JSON.stringify({
-        locationColumn: mappingLocationCol || null,
-        subLocationColumn: mappingSubLocationCol || null,
-        boxIdColumn: mappingBoxIdCol || null,
-        descriptionColumn: mappingDescriptionCol || null,
-        tagsColumn: mappingTagsCol || null,
-        createdColumn: mappingCreatedCol || null,
-        modifiedColumn: mappingModifiedCol || null
-      }));
-
-      const response = await fetch('/api/items/import', {
-        method: 'POST',
-        body: formData,
-      });
-
-      const result = await response.json();
-      if (result.success) {
-        setError(null);
-        setImportDialogOpen(false);
-        setImportFile(null);
-        fetchItems();
-        fetchBoxes();
-        fetchLocations();
-      } else {
-        setError(result.error || 'Failed to import file');
-      }
-    } catch (err) {
-      setError('Error importing: ' + err.message);
-    } finally {
-      setImporting(false);
-    }
-  };
-
-  const handleImportCancel = () => {
-    setImportDialogOpen(false);
-    setImportFile(null);
-    setImportColumns([]);
-    setMappingLocationCol('');
-    setMappingSubLocationCol('');
-    setMappingBoxIdCol('');
-    setMappingDescriptionCol('');
-    setMappingTagsCol('');
-    setMappingCreatedCol('');
-    setMappingModifiedCol('');
   };
 
   const handleSort = (fieldKey) => {
@@ -696,19 +555,6 @@ const ItemListPage = () => {
     }
   };
 
-  const handleClearDatabase = async () => {
-    try {
-      await fetch('/api/data/clear-all', { method: 'DELETE' });
-      setClearDialogOpen(false);
-      setItems([]);
-      setSelectedItems(new Set());
-      setAnchorItemId(null);
-      setError(null);
-    } catch (err) {
-      setError('Error clearing database: ' + err.message);
-    }
-  };
-
   const handleEdit = (itemId) => {
     navigate(`/edit/${itemId}`);
   };
@@ -719,68 +565,14 @@ const ItemListPage = () => {
   return (
     <Container maxWidth="xl" sx={{ mt: 4, mb: 4 }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h4">Junk Tracker</Typography>
-        <Box>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".csv,.xlsx,.xls"
-            style={{ display: 'none' }}
-            onChange={handleImportFileSelect}
-          />
-          <TextField
-            select
-            size="small"
-            value={exportFormat}
-            onChange={(e) => setExportFormat(e.target.value)}
-            sx={{ mr: 1, minWidth: 80 }}
-          >
-            <MenuItem value="csv">CSV</MenuItem>
-            <MenuItem value="xlsx">Excel</MenuItem>
-          </TextField>
-          <Tooltip title={`Export as ${exportFormat === 'xlsx' ? 'Excel' : 'CSV'}`}>
-            <IconButton onClick={handleExport} sx={{ mr: 1 }}>
-              <DownloadIcon />
-            </IconButton>
-          </Tooltip>
-          <Tooltip title="Import CSV or Excel">
-            <IconButton onClick={() => fileInputRef.current.click()}>
-              <UploadIcon />
-            </IconButton>
-          </Tooltip>
-          <Button
-            variant="outlined"
-            color="error"
-            size="small"
-            sx={{ ml: 1 }}
-            onClick={() => setClearDialogOpen(true)}
-          >
-            Clear Database
-          </Button>
-          <Tooltip title="Manage Locations">
-            <IconButton onClick={() => navigate('/locations')}>
-              <LocationOnIcon />
-            </IconButton>
-          </Tooltip>
-          <Tooltip title="Manage Boxes">
-            <IconButton onClick={() => navigate('/boxes')}>
-              <StorageIcon />
-            </IconButton>
-          </Tooltip>
-          <Tooltip title="Manage Tags">
-            <IconButton onClick={() => navigate('/tags')}>
-              <LabelIcon />
-            </IconButton>
-          </Tooltip>
-          <Button
-            variant="contained"
-            startIcon={<AddIcon />}
-            onClick={() => navigate('/entry')}
-            sx={{ ml: 1 }}
-          >
-            Add New Item
-          </Button>
-        </Box>
+        <Typography variant="h4">Items</Typography>
+        <Button
+          variant="contained"
+          startIcon={<AddIcon />}
+          onClick={() => navigate('/entry')}
+        >
+          Add New Item
+        </Button>
       </Box>
 
       {error && (
@@ -1137,167 +929,6 @@ const ItemListPage = () => {
         </DialogActions>
       </Dialog>
 
-      {/* Clear Database Dialog */}
-      <Dialog open={clearDialogOpen} onClose={() => setClearDialogOpen(false)}>
-        <DialogTitle>Clear Database</DialogTitle>
-        <DialogContent>
-          <DialogContentText>
-            Are you sure you want to clear ALL data? This will permanently delete all items, boxes, locations, and tags. This action cannot be undone.
-          </DialogContentText>
-          <Alert severity="error" sx={{ mt: 2 }}>
-            This is a destructive operation that removes everything from the database.
-          </Alert>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setClearDialogOpen(false)}>Cancel</Button>
-          <Button onClick={handleClearDatabase} color="error" variant="contained">
-            Clear Everything
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* Import Mapping Dialog */}
-      <Dialog open={importDialogOpen} onClose={handleImportCancel} maxWidth="sm" fullWidth>
-        <DialogTitle>Map Columns for Import</DialogTitle>
-        <DialogContent>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            File: {importFile?.name} ({importRowCount} rows, {importColumns.length} columns)
-          </Typography>
-
-          <Box sx={{ mb: 2 }}>
-            <Typography variant="subtitle2" gutterBottom>Location Column</Typography>
-            <FormControl fullWidth size="small">
-              <InputLabel>Choose column</InputLabel>
-              <Select
-                value={mappingLocationCol}
-                label="Choose column"
-                onChange={(e) => setMappingLocationCol(e.target.value)}
-              >
-                <MenuItem value="">— None —</MenuItem>
-                {importColumns.map(col => (
-                  <MenuItem key={`loc-${col}`} value={col}>{col}</MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </Box>
-
-          <Box sx={{ mb: 2 }}>
-            <Typography variant="subtitle2" gutterBottom>Sub-Location Column</Typography>
-            <FormControl fullWidth size="small">
-              <InputLabel>Choose column</InputLabel>
-              <Select
-                value={mappingSubLocationCol}
-                label="Choose column"
-                onChange={(e) => setMappingSubLocationCol(e.target.value)}
-              >
-                <MenuItem value="">— None —</MenuItem>
-                {importColumns.map(col => (
-                  <MenuItem key={`subloc-${col}`} value={col}>{col}</MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </Box>
-
-          <Box sx={{ mb: 2 }}>
-            <Typography variant="subtitle2" gutterBottom>Box ID Column</Typography>
-            <FormControl fullWidth size="small">
-              <InputLabel>Choose column</InputLabel>
-              <Select
-                value={mappingBoxIdCol}
-                label="Choose column"
-                onChange={(e) => setMappingBoxIdCol(e.target.value)}
-              >
-                <MenuItem value="">— None —</MenuItem>
-                {importColumns.map(col => (
-                  <MenuItem key={`box-${col}`} value={col}>{col}</MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </Box>
-
-          <Box sx={{ mb: 2 }}>
-            <Typography variant="subtitle2" gutterBottom>Item Description Column</Typography>
-            <FormControl fullWidth size="small">
-              <InputLabel>Choose column</InputLabel>
-              <Select
-                value={mappingDescriptionCol}
-                label="Choose column"
-                onChange={(e) => setMappingDescriptionCol(e.target.value)}
-              >
-                <MenuItem value="">— None —</MenuItem>
-                {importColumns.map(col => (
-                  <MenuItem key={`desc-${col}`} value={col}>{col}</MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </Box>
-
-          <Box sx={{ mb: 2 }}>
-            <Typography variant="subtitle2" gutterBottom>Tags Column</Typography>
-            <FormControl fullWidth size="small">
-              <InputLabel>Choose column</InputLabel>
-              <Select
-                value={mappingTagsCol}
-                label="Choose column"
-                onChange={(e) => setMappingTagsCol(e.target.value)}
-              >
-                <MenuItem value="">— None —</MenuItem>
-                {importColumns.map(col => (
-                  <MenuItem key={`tags-${col}`} value={col}>{col}</MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </Box>
-
-          <Box sx={{ mb: 2 }}>
-            <Typography variant="subtitle2" gutterBottom>Created Column</Typography>
-            <FormControl fullWidth size="small">
-              <InputLabel>Choose column</InputLabel>
-              <Select
-                value={mappingCreatedCol}
-                label="Choose column"
-                onChange={(e) => setMappingCreatedCol(e.target.value)}
-              >
-                <MenuItem value="">— None —</MenuItem>
-                {importColumns.map(col => (
-                  <MenuItem key={`created-${col}`} value={col}>{col}</MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </Box>
-
-          <Box sx={{ mb: 2 }}>
-            <Typography variant="subtitle2" gutterBottom>Last Modified Column</Typography>
-            <FormControl fullWidth size="small">
-              <InputLabel>Choose column</InputLabel>
-              <Select
-                value={mappingModifiedCol}
-                label="Choose column"
-                onChange={(e) => setMappingModifiedCol(e.target.value)}
-              >
-                <MenuItem value="">— None —</MenuItem>
-                {importColumns.map(col => (
-                  <MenuItem key={`modified-${col}`} value={col}>{col}</MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </Box>
-
-          <Typography variant="caption" color="text.secondary">
-            Location + Sub-Location together uniquely identify a location. Box ID identifies boxes. Tags are comma-separated names (missing tags are created automatically). Unparseable dates fall back to the import time. All other columns in the file will be ignored.
-          </Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={handleImportCancel}>Cancel</Button>
-          <Button
-            onClick={handleImportExecute}
-            variant="contained"
-            disabled={importing}
-          >
-            {importing ? 'Importing...' : 'Import'}
-          </Button>
-        </DialogActions>
-      </Dialog>
     </Container>
   );
 };

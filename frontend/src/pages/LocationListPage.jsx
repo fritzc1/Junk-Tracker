@@ -27,7 +27,6 @@ import {
   Edit as EditIcon,
   Delete as DeleteIcon,
   Storage as StorageIcon,
-  ArrowBack as ArrowBackIcon,
 } from '@mui/icons-material';
 import { api } from '../services/api';
 import SearchBar from '../components/SearchBar';
@@ -264,16 +263,7 @@ const LocationListPage = () => {
   return (
     <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 3 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center' }}>
-          <Button
-            startIcon={<ArrowBackIcon />}
-            onClick={() => navigate('/')}
-            sx={{ mr: 2 }}
-          >
-            Back
-          </Button>
-          <Typography variant="h4">Locations</Typography>
-        </Box>
+        <Typography variant="h4">Locations</Typography>
         <Button
           variant="contained"
           startIcon={<AddIcon />}

@@ -26,7 +26,6 @@ import {
   Add as AddIcon,
   Edit as EditIcon,
   Delete as DeleteIcon,
-  ArrowBack as ArrowBackIcon,
 } from '@mui/icons-material';
 import { api } from '../services/api';
 import PaginationBar from '../components/PaginationBar';
@@ -132,16 +131,7 @@ const TagListPage = () => {
   return (
     <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 3 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center' }}>
-          <Button
-            startIcon={<ArrowBackIcon />}
-            onClick={() => navigate('/')}
-            sx={{ mr: 2 }}
-          >
-            Back
-          </Button>
-          <Typography variant="h4">Tags</Typography>
-        </Box>
+        <Typography variant="h4">Tags</Typography>
         <Button
           variant="contained"
           startIcon={<AddIcon />}
