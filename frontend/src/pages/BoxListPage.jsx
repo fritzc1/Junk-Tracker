@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Container,
   Paper,
@@ -10,6 +10,7 @@ import {
   TableHead,
   TableRow,
   Button,
+  Chip,
   IconButton,
   Tooltip,
   Box,
@@ -85,9 +86,25 @@ const BoxListPage = () => {
   const [boxToDelete, setBoxToDelete] = useState(null);
   const navigate = useNavigate();
 
+  // Active location filter from URL (?locationId=...) — set by "View Boxes" on the Locations page.
+  // The URL param is the single source of truth so deep links and back-button work correctly.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const locationFilterId = searchParams.get('locationId');
+
+  const clearLocationFilter = () => {
+    const next = new URLSearchParams(searchParams);
+    next.delete('locationId');
+    setSearchParams(next);
+  };
+
   useEffect(() => {
     fetchBoxes();
   }, []);
+
+  // Reset pagination whenever the location filter changes or is cleared
+  useEffect(() => {
+    setPage(0);
+  }, [locationFilterId]);
 
   const fetchBoxes = async () => {
     try {
@@ -214,7 +231,23 @@ const BoxListPage = () => {
     return searchCriteria.every(criterion => matchesCriterion(box, criterion));
   };
 
-  const filteredBoxes = boxes.filter(applySearchFilter);
+  // Pre-filter by active location from URL (?locationId=...) before search/sort/pagination.
+  // Boxes without a populated location are excluded when the filter is active.
+  const matchesLocationFilter = (box) => {
+    if (!box.locationPopulated || !box.locationPopulated._id) return false;
+    return String(box.locationPopulated._id) === String(locationFilterId);
+  };
+
+  const locationFilteredBoxes = locationFilterId ? boxes.filter(matchesLocationFilter) : boxes;
+
+  // Label for the active filter chip (resolved from any matching box's populated location)
+  const locationFilterLabel = useMemo(() => {
+    if (!locationFilterId) return '';
+    const match = boxes.find(b => b.locationPopulated && String(b.locationPopulated._id) === String(locationFilterId));
+    return getBoxLocationLabel(match || {}) || 'Unknown location';
+  }, [boxes, locationFilterId]);
+
+  const filteredBoxes = locationFilteredBoxes.filter(applySearchFilter);
 
   // Sorting state and helpers
   const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' });
@@ -313,6 +346,12 @@ const BoxListPage = () => {
         clearAll={clearSearchCriteria}
       />
 
+      {locationFilterId && (
+        <Box sx={{ mb: 2 }}>
+          <Chip label={`Location: ${locationFilterLabel}`} color="primary" onDelete={clearLocationFilter} />
+        </Box>
+      )}
+
       <TableContainer component={Paper}>
         <Table>
           <TableHead>
@@ -349,7 +388,9 @@ const BoxListPage = () => {
                 <TableCell colSpan={totalColumns} sx={{ textAlign: 'center' }}>
                   {boxes.length === 0
                     ? 'No boxes found. Import data or add a box to get started.'
-                    : 'No boxes match your search.'}
+                    : locationFilterId && locationFilteredBoxes.length === 0
+                      ? 'No boxes at this location.'
+                      : 'No boxes match your search.'}
                 </TableCell>
               </TableRow>
             ) : (

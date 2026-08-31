@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Autocomplete,
   Box,
@@ -163,11 +163,27 @@ const ItemListPage = () => {
 
   const navigate = useNavigate();
 
+  // Active box filter from URL (?boxId=...) — set by "View Items" on the Boxes page.
+  // The URL param is the single source of truth so deep links and back-button work correctly.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const boxFilterId = searchParams.get('boxId');
+
+  const clearBoxFilter = () => {
+    const next = new URLSearchParams(searchParams);
+    next.delete('boxId');
+    setSearchParams(next);
+  };
+
   useEffect(() => {
     fetchBoxes();
     fetchItems();
     fetchLocations();
   }, []);
+
+  // Reset pagination whenever the box filter changes or is cleared
+  useEffect(() => {
+    setPage(0);
+  }, [boxFilterId]);
 
   const fetchBoxes = async () => {
     try {
@@ -421,7 +437,23 @@ const ItemListPage = () => {
     return searchCriteria.every(criterion => matchesCriterion(item, criterion));
   };
 
-  const filteredItems = items.filter(applySearchFilter);
+  // Pre-filter by active box from URL (?boxId=...) before search/sort/pagination.
+  // Items without a box are excluded when the filter is active.
+  const matchesBoxFilter = (item) => {
+    if (!item.boxId || !item.boxId._id) return false;
+    return String(item.boxId._id) === String(boxFilterId);
+  };
+
+  const boxFilteredItems = boxFilterId ? items.filter(matchesBoxFilter) : items;
+
+  // Label for the active filter chip (resolved from the boxes list)
+  const boxFilterLabel = useMemo(() => {
+    if (!boxFilterId) return '';
+    const match = boxes.find(b => String(b._id) === String(boxFilterId));
+    return match?.boxId || 'Unknown box';
+  }, [boxes, boxFilterId]);
+
+  const filteredItems = boxFilteredItems.filter(applySearchFilter);
 
   // ---- Bulk Edit Logic ----
   const selectedItemsList = items.filter(item => selectedItems.has(item._id));
@@ -765,6 +797,12 @@ const ItemListPage = () => {
         clearAll={clearSearchCriteria}
       />
 
+      {boxFilterId && (
+        <Box sx={{ mb: 2 }}>
+          <Chip label={`Box: ${boxFilterLabel}`} color="primary" onDelete={clearBoxFilter} />
+        </Box>
+      )}
+
       <TableContainer component={Paper}>
         <Table>
           <TableHead>
@@ -820,7 +858,11 @@ const ItemListPage = () => {
               </TableRow>
             ) : sortedItems.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={totalColumns} align="center">No items found.</TableCell>
+                <TableCell colSpan={totalColumns} align="center">
+                  {boxFilterId && boxFilteredItems.length === 0
+                    ? 'No items in this box.'
+                    : 'No items found.'}
+                </TableCell>
               </TableRow>
             ) : (
               paginatedItems.map(item => (
