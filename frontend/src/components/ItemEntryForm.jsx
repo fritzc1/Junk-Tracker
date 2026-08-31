@@ -9,10 +9,13 @@ import {
   Box,
   Alert,
   Autocomplete,
+  IconButton,
 } from '@mui/material';
-import { ArrowBack as ArrowBackIcon } from '@mui/icons-material';
+import { ArrowBack as ArrowBackIcon, Add as AddIcon } from '@mui/icons-material';
 import { api } from '../services/api';
 import TagSelector from './TagSelector';
+import NewBoxDialog from './NewBoxDialog';
+import NewLocationDialog from './NewLocationDialog';
 
 const ItemEntryForm = ({ mode }) => {
   const { id } = useParams();
@@ -26,6 +29,27 @@ const ItemEntryForm = ({ mode }) => {
   const [tags, setTags] = useState([]);
   const [loading, setLoading] = useState(mode === 'edit');
   const [error, setError] = useState(null);
+  // Quick-create dialogs (no navigation away from this page)
+  const [newBoxOpen, setNewBoxOpen] = useState(false);
+  const [newLocationOpen, setNewLocationOpen] = useState(false);
+
+  // A box was just created in the dialog: add it to options and select it.
+  // newLocation is non-null when its location was also created inline —
+  // add that too so the inherited-location label resolves immediately.
+  const handleNewBoxCreated = (box, newLocation) => {
+    setBoxes(prev => [...prev, box]);
+    if (newLocation) {
+      setLocations(prev => [...prev, newLocation]);
+    }
+    setSelectedBoxId(box._id);
+    setSelectedLocationId('');
+  };
+
+  // A location was just created in the dialog: add it to options and select it.
+  const handleNewLocationCreated = (location) => {
+    setLocations(prev => [...prev, location]);
+    setSelectedLocationId(location._id);
+  };
 
   useEffect(() => {
     fetchBoxes();
@@ -204,13 +228,37 @@ const ItemEntryForm = ({ mode }) => {
                     label="Box"
                     placeholder="Type to search or select a box..."
                     helperText="Selecting a box clears any direct location."
+                    slotProps={{
+                      ...params.slotProps,
+                      input: {
+                        ...params.slotProps?.input,
+                        endAdornment: (
+                          <>
+                            <IconButton
+                              size="small"
+                              aria-label="Add new box"
+                              title="Add new box"
+                              onClick={(e) => {
+                                // Don't let the click bubble to the Autocomplete root
+                                e.stopPropagation();
+                                setNewBoxOpen(true);
+                              }}
+                            >
+                              <AddIcon fontSize="small" />
+                            </IconButton>
+                            {params.slotProps?.input?.endAdornment}
+                          </>
+                        ),
+                      },
+                    }}
                   />
                 )}
               />
             </Box>
 
-            {/* Direct Location Selection (when no box selected) */}
-            {!selectedBoxId && locations.length > 0 && (
+            {/* Direct Location Selection (when no box selected). Always shown —
+                the "+" button lets you create the first location inline. */}
+            {!selectedBoxId && (
               <Autocomplete
                 options={locations}
                 value={selectedLocationId ? locations.find(l => l._id === selectedLocationId) || null : null}
@@ -228,6 +276,29 @@ const ItemEntryForm = ({ mode }) => {
                     {...params}
                     label="Location (direct)"
                     placeholder="Type to search or select a location..."
+                    slotProps={{
+                      ...params.slotProps,
+                      input: {
+                        ...params.slotProps?.input,
+                        endAdornment: (
+                          <>
+                            <IconButton
+                              size="small"
+                              aria-label="Add new location"
+                              title="Add new location"
+                              onClick={(e) => {
+                                // Don't let the click bubble to the Autocomplete root
+                                e.stopPropagation();
+                                setNewLocationOpen(true);
+                              }}
+                            >
+                              <AddIcon fontSize="small" />
+                            </IconButton>
+                            {params.slotProps?.input?.endAdornment}
+                          </>
+                        ),
+                      },
+                    }}
                   />
                 )}
               />
@@ -267,6 +338,18 @@ const ItemEntryForm = ({ mode }) => {
           </form>
         </Paper>
       )}
+
+      {/* Quick-create dialogs — reuse the same entry forms as the full pages */}
+      <NewBoxDialog
+        open={newBoxOpen}
+        onClose={() => setNewBoxOpen(false)}
+        onCreated={handleNewBoxCreated}
+      />
+      <NewLocationDialog
+        open={newLocationOpen}
+        onClose={() => setNewLocationOpen(false)}
+        onCreated={handleNewLocationCreated}
+      />
     </Container>
   );
 };
