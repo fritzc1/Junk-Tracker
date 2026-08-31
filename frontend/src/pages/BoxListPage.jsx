@@ -22,7 +22,6 @@ import {
   DialogContentText,
   DialogTitle,
   TableSortLabel,
-  TablePagination,
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -33,6 +32,7 @@ import {
 } from '@mui/icons-material';
 import { api } from '../services/api';
 import SearchBar from '../components/SearchBar';
+import PaginationBar from '../components/PaginationBar';
 import useRowsPerPage from '../hooks/useRowsPerPage';
 
 // Fixed column set for the boxes table. Values resolve from entity references:
@@ -349,6 +349,16 @@ const BoxListPage = () => {
         </Box>
       )}
 
+      <PaginationBar
+        sx={{ mb: 1 }}
+        count={sortedBoxes.length}
+        page={page}
+        onPageChange={handleChangePage}
+        rowsPerPage={rowsPerPage}
+        onRowsPerPageChange={handleChangeRowsPerPage}
+        rowsPerPageOptions={[5, 10, 25, 50, { label: 'All', value: -1 }]}
+      />
+
       <TableContainer component={Paper}>
         <Table>
           <TableHead>
@@ -421,16 +431,6 @@ const BoxListPage = () => {
           </TableBody>
         </Table>
       </TableContainer>
-
-      <TablePagination
-        component="div"
-        count={sortedBoxes.length}
-        page={page}
-        onPageChange={handleChangePage}
-        rowsPerPage={rowsPerPage}
-        onRowsPerPageChange={handleChangeRowsPerPage}
-        rowsPerPageOptions={[5, 10, 25, 50, { label: 'All', value: -1 }]}
-      />
 
       {/* Delete Confirmation Dialog */}
       <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)}>

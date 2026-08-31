@@ -9,7 +9,6 @@ import {
   TableContainer,
   TableHead,
   TableRow,
-  TablePagination,
   Button,
   IconButton,
   Tooltip,
@@ -30,6 +29,7 @@ import {
   ArrowBack as ArrowBackIcon,
 } from '@mui/icons-material';
 import { api } from '../services/api';
+import PaginationBar from '../components/PaginationBar';
 import useRowsPerPage from '../hooks/useRowsPerPage';
 
 const TagListPage = () => {
@@ -157,6 +157,16 @@ const TagListPage = () => {
         </Alert>
       )}
 
+      <PaginationBar
+        sx={{ mb: 1 }}
+        count={tags.length}
+        page={page}
+        onPageChange={handleChangePage}
+        rowsPerPage={rowsPerPage}
+        onRowsPerPageChange={handleChangeRowsPerPage}
+        rowsPerPageOptions={[5, 10, 25, 50, { label: 'All', value: -1 }]}
+      />
+
       <TableContainer component={Paper}>
         <Table>
           <TableHead>
@@ -200,16 +210,6 @@ const TagListPage = () => {
           </TableBody>
         </Table>
       </TableContainer>
-
-      <TablePagination
-        component="div"
-        count={tags.length}
-        page={page}
-        onPageChange={handleChangePage}
-        rowsPerPage={rowsPerPage}
-        onRowsPerPageChange={handleChangeRowsPerPage}
-        rowsPerPageOptions={[5, 10, 25, 50, { label: 'All', value: -1 }]}
-      />
 
       {/* Edit/Create Dialog */}
       <Dialog open={editOpen} onClose={handleCloseEdit}>

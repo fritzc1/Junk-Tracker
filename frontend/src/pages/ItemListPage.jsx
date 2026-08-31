@@ -24,7 +24,6 @@ import {
   TableContainer,
   TableHead,
   TableRow,
-  TablePagination,
   TextField,
   Tooltip,
   Typography,
@@ -46,6 +45,7 @@ import {
 } from '@mui/icons-material';
 import { api } from '../services/api';
 import SearchBar from '../components/SearchBar';
+import PaginationBar from '../components/PaginationBar';
 import useRowsPerPage from '../hooks/useRowsPerPage';
 
 // Fixed column set for the items table. Values resolve from entity references:
@@ -812,6 +812,16 @@ const ItemListPage = () => {
         </Box>
       )}
 
+      <PaginationBar
+        sx={{ mb: 1 }}
+        count={paginatedCount}
+        page={page}
+        onPageChange={handleChangePage}
+        rowsPerPage={rowsPerPage}
+        onRowsPerPageChange={handleChangeRowsPerPage}
+        rowsPerPageOptions={[5, 10, 25, 50, { label: 'All', value: -1 }]}
+      />
+
       <TableContainer component={Paper}>
         <Table>
           <TableHead>
@@ -920,16 +930,6 @@ const ItemListPage = () => {
           </TableBody>
         </Table>
       </TableContainer>
-
-      <TablePagination
-        component="div"
-        count={paginatedCount}
-        page={page}
-        onPageChange={handleChangePage}
-        rowsPerPage={rowsPerPage}
-        onRowsPerPageChange={handleChangeRowsPerPage}
-        rowsPerPageOptions={[5, 10, 25, 50, { label: 'All', value: -1 }]}
-      />
 
       {selectedItems.size > 0 && (
         <Box sx={{ display: 'flex', alignItems: 'center', mt: 2 }}>
