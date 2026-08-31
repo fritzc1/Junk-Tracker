@@ -21,6 +21,7 @@ import {
   DialogContentText,
   DialogTitle,
   TableSortLabel,
+  TablePagination,
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -76,6 +77,9 @@ const BoxListPage = () => {
   const [searchCriteria, setSearchCriteria] = useState([
     { id: 1, field: '', operator: 'contains', value: '' }
   ]);
+
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(10);
 
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [boxToDelete, setBoxToDelete] = useState(null);
@@ -246,6 +250,21 @@ const BoxListPage = () => {
     });
   }, [filteredBoxes, sortConfig]);
 
+  // Pagination (client-side over the filtered + sorted list)
+  const paginatedBoxes = sortedBoxes.slice(
+    page * rowsPerPage,
+    page * rowsPerPage + (rowsPerPage === -1 ? sortedBoxes.length : rowsPerPage)
+  );
+
+  const handleChangePage = (event, newPage) => {
+    setPage(newPage);
+  };
+
+  const handleChangeRowsPerPage = (event) => {
+    setRowsPerPage(event.target.value === 'all' ? -1 : parseInt(event.target.value, 10));
+    setPage(0);
+  };
+
   // Total column count for colSpan: fixed columns + last modified + items + actions
   const totalColumns = FIXED_COLUMNS.length + 3;
 
@@ -334,7 +353,7 @@ const BoxListPage = () => {
                 </TableCell>
               </TableRow>
             ) : (
-              sortedBoxes.map(box => (
+              paginatedBoxes.map(box => (
                 <TableRow key={box._id}>
                   {FIXED_COLUMNS.map(col => (
                     <TableCell key={col.key}>{getFixedColumnValue(box, col.key) || ''}</TableCell>
@@ -364,6 +383,16 @@ const BoxListPage = () => {
           </TableBody>
         </Table>
       </TableContainer>
+
+      <TablePagination
+        component="div"
+        count={sortedBoxes.length}
+        page={page}
+        onPageChange={handleChangePage}
+        rowsPerPage={rowsPerPage}
+        onRowsPerPageChange={handleChangeRowsPerPage}
+        rowsPerPageOptions={[5, 10, 25, 50, { label: 'All', value: -1 }]}
+      />
 
       {/* Delete Confirmation Dialog */}
       <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)}>

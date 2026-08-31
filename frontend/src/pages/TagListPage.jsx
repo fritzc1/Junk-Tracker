@@ -9,6 +9,7 @@ import {
   TableContainer,
   TableHead,
   TableRow,
+  TablePagination,
   Button,
   IconButton,
   Tooltip,
@@ -34,6 +35,10 @@ const TagListPage = () => {
   const [tags, setTags] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(10);
+
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [tagToDelete, setTagToDelete] = useState(null);
 
@@ -112,6 +117,21 @@ const TagListPage = () => {
     }
   };
 
+  // Pagination (client-side over the full list)
+  const paginatedTags = tags.slice(
+    page * rowsPerPage,
+    page * rowsPerPage + (rowsPerPage === -1 ? tags.length : rowsPerPage)
+  );
+
+  const handleChangePage = (event, newPage) => {
+    setPage(newPage);
+  };
+
+  const handleChangeRowsPerPage = (event) => {
+    setRowsPerPage(event.target.value === 'all' ? -1 : parseInt(event.target.value, 10));
+    setPage(0);
+  };
+
   return (
     <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
       <Box display="flex" alignItems="center" justifyContent="space-between" mb={3}>
@@ -161,7 +181,7 @@ const TagListPage = () => {
                 </TableCell>
               </TableRow>
             ) : (
-              tags.map(tag => (
+              paginatedTags.map(tag => (
                 <TableRow key={tag._id}>
                   <TableCell>{tag.name}</TableCell>
                   <TableCell align="right">{tag.itemCount || 0}</TableCell>
@@ -183,6 +203,16 @@ const TagListPage = () => {
           </TableBody>
         </Table>
       </TableContainer>
+
+      <TablePagination
+        component="div"
+        count={tags.length}
+        page={page}
+        onPageChange={handleChangePage}
+        rowsPerPage={rowsPerPage}
+        onRowsPerPageChange={handleChangeRowsPerPage}
+        rowsPerPageOptions={[5, 10, 25, 50, { label: 'All', value: -1 }]}
+      />
 
       {/* Edit/Create Dialog */}
       <Dialog open={editOpen} onClose={handleCloseEdit}>
