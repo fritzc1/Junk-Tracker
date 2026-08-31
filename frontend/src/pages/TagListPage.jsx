@@ -30,6 +30,7 @@ import {
   ArrowBack as ArrowBackIcon,
 } from '@mui/icons-material';
 import { api } from '../services/api';
+import useRowsPerPage from '../hooks/useRowsPerPage';
 
 const TagListPage = () => {
   const [tags, setTags] = useState([]);
@@ -37,7 +38,8 @@ const TagListPage = () => {
   const [error, setError] = useState(null);
 
   const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(10);
+  // Persisted per-page in sessionStorage; resets to page 0 on change.
+  const [rowsPerPage, handleChangeRowsPerPage] = useRowsPerPage('tags', () => setPage(0));
 
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [tagToDelete, setTagToDelete] = useState(null);
@@ -125,11 +127,6 @@ const TagListPage = () => {
 
   const handleChangePage = (event, newPage) => {
     setPage(newPage);
-  };
-
-  const handleChangeRowsPerPage = (event) => {
-    setRowsPerPage(event.target.value === 'all' ? -1 : parseInt(event.target.value, 10));
-    setPage(0);
   };
 
   return (

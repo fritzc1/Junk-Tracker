@@ -46,6 +46,7 @@ import {
 } from '@mui/icons-material';
 import { api } from '../services/api';
 import SearchBar from '../components/SearchBar';
+import useRowsPerPage from '../hooks/useRowsPerPage';
 
 // Fixed column set for the items table. Values resolve from entity references:
 //   Location / Sub-Location → Location entity (via box.locationId or item.locationId)
@@ -124,7 +125,8 @@ const ItemListPage = () => {
   ]);
 
   const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(10);
+  // Persisted per-page in sessionStorage; resets to page 0 on change.
+  const [rowsPerPage, handleChangeRowsPerPage] = useRowsPerPage('items', () => setPage(0));
   const [selectedItems, setSelectedItems] = useState(new Set());
   // Last row clicked with a plain click; used as the start of Shift+click range selection.
   const [anchorItemId, setAnchorItemId] = useState(null);
@@ -642,11 +644,6 @@ const ItemListPage = () => {
 
   const handleChangePage = (event, newPage) => {
     setPage(newPage);
-  };
-
-  const handleChangeRowsPerPage = (event) => {
-    setRowsPerPage(event.target.value === 'all' ? -1 : parseInt(event.target.value, 10));
-    setPage(0);
   };
 
   const handleSelectAll = (event) => {
