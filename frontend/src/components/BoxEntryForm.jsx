@@ -19,6 +19,9 @@ import LocationEntryForm from './LocationEntryForm';
  * what to do on success via `onSaved(box)`. Used both as a full page
  * (BoxEntryPage) and inside quick-create dialogs (NewBoxDialog).
  *
+ * The Box ID field is a freeSolo autocomplete: it lists existing box IDs,
+ * narrows them as you type, and flags exact duplicates before submit.
+ *
  * Props:
  *   mode             - 'create' | 'edit'
  *   id               - box id when mode === 'edit'
@@ -37,6 +40,12 @@ const BoxEntryForm = ({ mode = 'create', id, onSaved, allowNewLocation = false, 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
 
+  // Existing box IDs (for live duplicate detection in the Box ID field)
+  const [existingBoxIds, setExistingBoxIds] = useState([]);
+  // This box's original ID when mode === 'edit' — excluded from dup checks so
+  // an unchanged ID is never flagged as a duplicate of itself.
+  const [ownBoxId, setOwnBoxId] = useState('');
+
   // Internal "create location" step state (single dialog, no nesting)
   const [creatingLocation, setCreatingLocation] = useState(false);
   // Location created during this session's internal step, if any — passed to
@@ -45,6 +54,7 @@ const BoxEntryForm = ({ mode = 'create', id, onSaved, allowNewLocation = false, 
 
   useEffect(() => {
     fetchLocations();
+    fetchExistingBoxIds();
     if (mode === 'edit' && id) {
       fetchBox();
     }
@@ -62,6 +72,26 @@ const BoxEntryForm = ({ mode = 'create', id, onSaved, allowNewLocation = false, 
     }
   };
 
+  // Load all existing box IDs so the Box ID field can offer live duplicate
+  // detection. Client-side filtering is fine at this app's scale; a dedicated
+  // search endpoint can replace this if the collection grows large.
+  const fetchExistingBoxIds = async () => {
+    try {
+      const response = await api.getBoxes();
+      if (response.success) {
+        const ids = [...new Set(
+          (response.data || [])
+            .map(b => b.boxId)
+            .filter(v => v && String(v).trim())
+            .map(v => String(v).trim())
+        )].sort((a, b) => a.localeCompare(b));
+        setExistingBoxIds(ids);
+      }
+    } catch (err) {
+      console.error('Error fetching existing box IDs:', err);
+    }
+  };
+
   // Display label for a location option: "Garage — Shelf 43" or just the name
   const getLocationLabel = (loc) => {
     if (!loc) return '';
@@ -74,6 +104,7 @@ const BoxEntryForm = ({ mode = 'create', id, onSaved, allowNewLocation = false, 
       const response = await api.getBoxById(id);
       if (response.success) {
         setBoxIdValue(response.data.boxId || '');
+        setOwnBoxId(response.data.boxId || '');
         if (response.data.locationId) {
           setSelectedLocationId(response.data.locationId._id || response.data.locationId);
         }
@@ -126,6 +157,26 @@ const BoxEntryForm = ({ mode = 'create', id, onSaved, allowNewLocation = false, 
     setCreatingLocation(false);
   };
 
+  // --- Box ID duplicate detection ---
+  const trimmedBoxId = boxIdValue.trim();
+  // In edit mode, exclude this box's own original ID so an unchanged value is
+  // never flagged as a duplicate of itself.
+  const boxIdOptions = mode === 'edit' && ownBoxId
+    ? existingBoxIds.filter(id => id !== ownBoxId)
+    : existingBoxIds;
+  // Case-sensitive exact match mirrors the backend's unique index behavior.
+  const isDuplicate = trimmedBoxId !== '' && boxIdOptions.includes(trimmedBoxId);
+
+  const getBoxIdHelperText = () => {
+    if (!trimmedBoxId) return 'Must be unique across all boxes (optional)';
+    if (isDuplicate) return 'This ID already exists — choose a different one';
+    const matchCount = boxIdOptions.filter(
+      id => id.toLowerCase().includes(trimmedBoxId.toLowerCase())
+    ).length;
+    if (matchCount === 0) return 'This ID is available';
+    return `${matchCount} similar ${matchCount === 1 ? 'ID' : 'IDs'} already exist`;
+  };
+
   if (loading) {
     return <Box sx={{ p: 2, textAlign: 'center' }}>Loading...</Box>;
   }
@@ -161,16 +212,52 @@ const BoxEntryForm = ({ mode = 'create', id, onSaved, allowNewLocation = false, 
         </Alert>
       )}
 
-      {/* Box ID */}
-      <TextField
+      {/* Box ID — freeSolo autocomplete: type freely; the dropdown lists
+          existing box IDs and narrows as you type, flagging exact duplicates */}
+      <Autocomplete
         fullWidth
-        label="Box ID"
-        value={boxIdValue}
-        onChange={(e) => setBoxIdValue(e.target.value)}
-        margin="normal"
-        placeholder="e.g., A06, FA03"
-        helperText="Must be unique across all boxes (optional)"
-        autoFocus
+        freeSolo
+        options={boxIdOptions}
+        value={boxIdValue || null}
+        // freeSolo quirk: typed-but-uncommitted text is discarded on blur unless it
+        // matches the controlled `value`. onChange only fires when an option is
+        // selected / Enter commits, so we must track every keystroke via
+        // onInputChange to keep boxIdValue (and duplicate detection) in sync.
+        onInputChange={(e, newInputValue) => setBoxIdValue(newInputValue ?? '')}
+        onChange={(e, newValue) => {
+          if (typeof newValue === 'string') setBoxIdValue(newValue);
+        }}
+        getOptionLabel={(option) => option}
+        filterOptions={(options, params) => {
+          const query = (params.inputValue || '').trim().toLowerCase();
+          if (!query) return options; // empty input → show all existing IDs
+          return options.filter(id => id.toLowerCase().includes(query));
+        }}
+        noOptionsText={trimmedBoxId ? 'No matching box IDs — this ID is available' : 'No boxes with an ID yet'}
+        renderOption={(props, option) => {
+          const isExact = option === trimmedBoxId; // case-sensitive, mirrors backend
+          return (
+            <li {...props}>
+              <Typography
+                variant="body2"
+                sx={{ color: isExact ? 'error.main' : 'text.primary', fontWeight: isExact ? 600 : 400 }}
+              >
+                {option}{isExact ? ' — already in use' : ''}
+              </Typography>
+            </li>
+          );
+        }}
+        renderInput={(params) => (
+          <TextField
+            {...params}
+            label="Box ID"
+            placeholder="e.g., A06, FA03"
+            helperText={getBoxIdHelperText()}
+            error={isDuplicate}
+            margin="normal"
+            autoFocus
+          />
+        )}
       />
 
       {/* Location Selection — searchable, matching the item form's location field */}
@@ -223,7 +310,7 @@ const BoxEntryForm = ({ mode = 'create', id, onSaved, allowNewLocation = false, 
             Cancel
           </Button>
         )}
-        <Button type="submit" variant="contained" disabled={saving}>
+        <Button type="submit" variant="contained" disabled={saving || isDuplicate}>
           {mode === 'create' ? 'Add Box' : 'Save Changes'}
         </Button>
       </Box>
