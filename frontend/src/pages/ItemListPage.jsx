@@ -126,6 +126,8 @@ const ItemListPage = () => {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [selectedItems, setSelectedItems] = useState(new Set());
+  // Last row clicked with a plain click; used as the start of Shift+click range selection.
+  const [anchorItemId, setAnchorItemId] = useState(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
 
@@ -608,16 +610,35 @@ const ItemListPage = () => {
       setSelectedItems(new Set(paginatedItems.map(item => item._id)));
     } else {
       setSelectedItems(new Set());
+      setAnchorItemId(null);
     }
   };
 
-  const handleSelectItem = (itemId) => {
+  // Plain click toggles a single row and sets it as the anchor.
+  // Shift+click selects the contiguous range between the anchor row and this row
+  // on the current page, merging it into any existing selection.
+  const handleSelectItem = (itemId, event) => {
     const newSelected = new Set(selectedItems);
-    if (newSelected.has(itemId)) {
-      newSelected.delete(itemId);
+    if (event?.shiftKey && anchorItemId) {
+      const anchorIndex = paginatedItems.findIndex(item => item._id === anchorItemId);
+      const clickIndex = paginatedItems.findIndex(item => item._id === itemId);
+      if (anchorIndex !== -1 && clickIndex !== -1) {
+        const [start, end] = anchorIndex < clickIndex ? [anchorIndex, clickIndex] : [clickIndex, anchorIndex];
+        for (let i = start; i <= end; i += 1) newSelected.add(paginatedItems[i]._id);
+      } else {
+        // Anchor not visible on this page — fall back to plain toggle.
+        if (newSelected.has(itemId)) newSelected.delete(itemId);
+        else newSelected.add(itemId);
+      }
     } else {
-      newSelected.add(itemId);
+      if (newSelected.has(itemId)) {
+        newSelected.delete(itemId);
+      } else {
+        newSelected.add(itemId);
+      }
     }
+    // The clicked row becomes the anchor for future Shift+clicks.
+    setAnchorItemId(itemId);
     setSelectedItems(newSelected);
   };
 
@@ -626,6 +647,7 @@ const ItemListPage = () => {
       const deletePromises = Array.from(selectedItems).map(id => api.deleteItem(id));
       await Promise.all(deletePromises);
       setSelectedItems(new Set());
+      setAnchorItemId(null);
       setDeleteDialogOpen(false);
       fetchItems();
     } catch (err) {
@@ -639,6 +661,7 @@ const ItemListPage = () => {
       setClearDialogOpen(false);
       setItems([]);
       setSelectedItems(new Set());
+      setAnchorItemId(null);
       setError(null);
     } catch (err) {
       setError('Error clearing database: ' + err.message);
@@ -805,7 +828,7 @@ const ItemListPage = () => {
                   <TableCell padding="checkbox">
                     <Checkbox
                       checked={selectedItems.has(item._id)}
-                      onChange={() => handleSelectItem(item._id)}
+                      onClick={(e) => handleSelectItem(item._id, e)}
                     />
                   </TableCell>
                   {FIXED_COLUMNS.map(col => (
