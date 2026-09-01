@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const Box = require('../models/Box');
 const Item = require('../models/Item');
 const { normalizeBoxId } = require('../utils/boxId');
@@ -7,15 +8,16 @@ const { normalizeBoxId } = require('../utils/boxId');
 // @access  Public
 const createBox = async (req, res) => {
   try {
+    const databaseId = req.databaseId;
     const { boxId, locationId } = req.body;
 
     // Normalize to the canonical stored form (trimmed + uppercase) so identity
     // is case-insensitive: "a06" and "A06" are the same box.
     const normalizedBoxId = normalizeBoxId(boxId);
 
-    // Check for duplicate boxId if provided
+    // Check for duplicate boxId if provided (within this database)
     if (normalizedBoxId) {
-      const existing = await Box.findOne({ boxId: normalizedBoxId });
+      const existing = await Box.findOne({ boxId: normalizedBoxId, databaseId });
       if (existing) {
         console.log(`[Box] Duplicate rejected: "${normalizedBoxId}"`);
         return res.status(400).json({
@@ -26,6 +28,7 @@ const createBox = async (req, res) => {
     }
 
     const box = await Box.create({
+      databaseId,
       boxId: normalizedBoxId || undefined,
       locationId: locationId || null
     });
@@ -56,6 +59,8 @@ const createBox = async (req, res) => {
 const getBoxes = async (req, res) => {
   try {
     const boxes = await Box.aggregate([
+      // Scope to the active database
+      { $match: { databaseId: new mongoose.Types.ObjectId(req.databaseId) } },
       // Lookup items in this box
       {
         $lookup: {
@@ -119,7 +124,7 @@ const getBoxes = async (req, res) => {
 // @access  Public
 const getBoxById = async (req, res) => {
   try {
-    const box = await Box.findById(req.params.id);
+    const box = await Box.findOne({ _id: req.params.id, databaseId: req.databaseId });
 
     if (!box) {
       return res.status(404).json({
@@ -128,8 +133,8 @@ const getBoxById = async (req, res) => {
       });
     }
 
-    // Get items for this box
-    const items = await Item.find({ boxId: req.params.id });
+    // Get items for this box (scoped to the active database)
+    const items = await Item.find({ boxId: req.params.id, databaseId: req.databaseId });
 
     res.status(200).json({
       success: true,
@@ -151,7 +156,7 @@ const getBoxById = async (req, res) => {
 // @access  Public
 const getBoxItems = async (req, res) => {
   try {
-    const box = await Box.findById(req.params.id);
+    const box = await Box.findOne({ _id: req.params.id, databaseId: req.databaseId });
 
     if (!box) {
       return res.status(404).json({
@@ -160,7 +165,7 @@ const getBoxItems = async (req, res) => {
       });
     }
 
-    const items = await Item.find({ boxId: req.params.id });
+    const items = await Item.find({ boxId: req.params.id, databaseId: req.databaseId });
 
     res.status(200).json({
       success: true,
@@ -180,9 +185,10 @@ const getBoxItems = async (req, res) => {
 // @access  Public
 const updateBox = async (req, res) => {
   try {
+    const databaseId = req.databaseId;
     const { boxId, locationId } = req.body;
 
-    let box = await Box.findById(req.params.id);
+    let box = await Box.findOne({ _id: req.params.id, databaseId });
 
     if (!box) {
       return res.status(404).json({
@@ -196,7 +202,7 @@ const updateBox = async (req, res) => {
     // of itself because existing values are already stored in this form.
     const newBoxId = boxId !== undefined ? normalizeBoxId(boxId) : (box.boxId || '');
     if (newBoxId && newBoxId !== box.boxId) {
-      const existing = await Box.findOne({ boxId: newBoxId, _id: { $ne: req.params.id } });
+      const existing = await Box.findOne({ boxId: newBoxId, databaseId, _id: { $ne: req.params.id } });
       if (existing) {
         return res.status(400).json({
           success: false,
@@ -229,7 +235,8 @@ const updateBox = async (req, res) => {
 // @access  Public
 const deleteBox = async (req, res) => {
   try {
-    const box = await Box.findById(req.params.id);
+    const databaseId = req.databaseId;
+    const box = await Box.findOne({ _id: req.params.id, databaseId });
 
     if (!box) {
       return res.status(404).json({
@@ -238,8 +245,8 @@ const deleteBox = async (req, res) => {
       });
     }
 
-    // Check if box has items
-    const itemCount = await Item.countDocuments({ boxId: req.params.id });
+    // Check if box has items (scoped to the active database)
+    const itemCount = await Item.countDocuments({ boxId: req.params.id, databaseId });
     if (itemCount > 0) {
       return res.status(400).json({
         success: false,

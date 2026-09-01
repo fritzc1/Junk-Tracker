@@ -38,17 +38,18 @@ const resolveBoxId = (item) => {
 const createItem = async (req, res) => {
   try {
     const Tag = require('../models/Tag');
+    const databaseId = req.databaseId;
     const { description, boxId, locationId, tagNames } = req.body;
 
-    // Auto-create tags from names if provided as strings
+    // Auto-create tags from names if provided as strings (scoped to this database)
     let tagIds = [];
     if (tagNames && Array.isArray(tagNames)) {
       for (const tagName of tagNames) {
         if (!tagName || !String(tagName).trim()) continue;
         const name = String(tagName).trim().toLowerCase();
-        let existingTag = await Tag.findOne({ name });
+        let existingTag = await Tag.findOne({ name, databaseId });
         if (!existingTag) {
-          existingTag = await Tag.create({ name });
+          existingTag = await Tag.create({ name, databaseId });
         }
         tagIds.push(existingTag._id);
       }
@@ -59,6 +60,7 @@ const createItem = async (req, res) => {
     const hasLocation = !!(locationId && String(locationId).trim());
 
     const item = await Item.create({
+      databaseId,
       description: (description || '').toString().trim(),
       boxId: hasBox ? boxId : null,
       locationId: hasLocation ? locationId : null,
@@ -82,8 +84,8 @@ const createItem = async (req, res) => {
 // @access  Public
 const getItems = async (req, res) => {
   try {
-    // Build query filter
-    const filter = {};
+    // Build query filter — always scoped to the active database
+    const filter = { databaseId: req.databaseId };
     if (req.query.boxId) {
       filter.boxId = req.query.boxId;
     }
@@ -125,7 +127,7 @@ const getItems = async (req, res) => {
 // @access  Public
 const getItemById = async (req, res) => {
   try {
-    const item = await Item.findById(req.params.id)
+    const item = await Item.findOne({ _id: req.params.id, databaseId: req.databaseId })
       .populate({
         path: 'boxId',
         select: 'boxId locationId',
@@ -159,9 +161,10 @@ const getItemById = async (req, res) => {
 const updateItem = async (req, res) => {
   try {
     const Tag = require('../models/Tag');
+    const databaseId = req.databaseId;
     const { description, boxId, locationId, tagNames } = req.body;
 
-    let item = await Item.findById(req.params.id);
+    let item = await Item.findOne({ _id: req.params.id, databaseId });
 
     if (!item) {
       return res.status(404).json({
@@ -201,9 +204,9 @@ const updateItem = async (req, res) => {
       for (const tagName of tagNames) {
         if (!tagName || !String(tagName).trim()) continue;
         const name = String(tagName).trim().toLowerCase();
-        let existingTag = await Tag.findOne({ name });
+        let existingTag = await Tag.findOne({ name, databaseId });
         if (!existingTag) {
-          existingTag = await Tag.create({ name });
+          existingTag = await Tag.create({ name, databaseId });
         }
         tagIds.push(existingTag._id);
       }
@@ -229,7 +232,7 @@ const updateItem = async (req, res) => {
 // @access  Public
 const deleteItem = async (req, res) => {
   try {
-    const item = await Item.findByIdAndDelete(req.params.id);
+    const item = await Item.findOneAndDelete({ _id: req.params.id, databaseId: req.databaseId });
 
     if (!item) {
       return res.status(404).json({
@@ -270,7 +273,7 @@ const buildExportRow = (item) => {
 // @access  Public
 const exportCsv = async (req, res) => {
   try {
-    const items = await Item.find()
+    const items = await Item.find({ databaseId: req.databaseId })
       .populate({
         path: 'boxId',
         select: 'boxId locationId',
@@ -298,7 +301,7 @@ const exportCsv = async (req, res) => {
 // @access  Public
 const exportXlsx = async (req, res) => {
   try {
-    const items = await Item.find()
+    const items = await Item.find({ databaseId: req.databaseId })
       .populate({
         path: 'boxId',
         select: 'boxId locationId',
@@ -335,8 +338,9 @@ const searchItems = async (req, res) => {
   try {
     const query = req.params.query;
 
-    // Fast path: match on the item's own description field in Mongo
+    // Fast path: match on the item's own description field in Mongo (scoped)
     let items = await Item.find({
+      databaseId: req.databaseId,
       description: { $regex: query, $options: 'i' }
     })
       .populate({
@@ -347,8 +351,8 @@ const searchItems = async (req, res) => {
       .populate('tags', 'name')
       .populate('locationId', 'name subLocation displayLabel');
 
-    // Also match items whose tags, resolved box ID or location contain the query
-    const allItems = await Item.find()
+    // Also match items whose tags, resolved box ID or location contain the query (scoped)
+    const allItems = await Item.find({ databaseId: req.databaseId })
       .populate({
         path: 'boxId',
         select: 'boxId locationId',

@@ -30,6 +30,7 @@ import {
   List as ListIcon,
 } from '@mui/icons-material';
 import { api } from '../services/api';
+import { useDatabases } from '../context/DatabaseContext';
 import SearchBar from '../components/SearchBar';
 import PaginationBar from '../components/PaginationBar';
 import useRowsPerPage from '../hooks/useRowsPerPage';
@@ -86,6 +87,7 @@ const BoxListPage = () => {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [boxToDelete, setBoxToDelete] = useState(null);
   const navigate = useNavigate();
+  const { activeDatabaseId } = useDatabases();
 
   // Active location filter from URL (?locationId=...) — set by "View Boxes" on the Locations page.
   // The URL param is the single source of truth so deep links and back-button work correctly.
@@ -98,9 +100,13 @@ const BoxListPage = () => {
     setSearchParams(next);
   };
 
+  // Load boxes on mount and whenever the active database changes (resetting
+  // pagination so a stale page number can't hide results).
   useEffect(() => {
+    setPage(0);
     fetchBoxes();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeDatabaseId]);
 
   // Reset pagination whenever the location filter changes or is cleared
   useEffect(() => {

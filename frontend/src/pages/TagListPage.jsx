@@ -29,6 +29,7 @@ import {
   List as ListIcon,
 } from '@mui/icons-material';
 import { api } from '../services/api';
+import { useDatabases } from '../context/DatabaseContext';
 import PaginationBar from '../components/PaginationBar';
 import useRowsPerPage from '../hooks/useRowsPerPage';
 
@@ -49,10 +50,14 @@ const TagListPage = () => {
   const [editingTagId, setEditingTagId] = useState(null);
   const [tagName, setTagName] = useState('');
   const navigate = useNavigate();
+  const { activeDatabaseId } = useDatabases();
 
+  // Load tags on mount and whenever the active database changes.
   useEffect(() => {
+    setPage(0);
     fetchTags();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeDatabaseId]);
 
   const fetchTags = async () => {
     try {

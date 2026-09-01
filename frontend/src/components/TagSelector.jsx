@@ -1,16 +1,19 @@
 import React, { useState, useEffect } from 'react';
 import { Autocomplete, TextField, Box, Typography } from '@mui/material';
 import { api } from '../services/api';
+import { useDatabases } from '../context/DatabaseContext';
 
 const TagSelector = ({ value, onChange }) => {
+  const { activeDatabaseId } = useDatabases();
   const [options, setOptions] = useState([]);
   const [loading, setLoading] = useState(false);
   const [inputValue, setInputValue] = useState('');
 
-  // Load all tags on mount
+  // Load all tags on mount and whenever the active database changes
   useEffect(() => {
     loadTags();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeDatabaseId]);
 
   const loadTags = async () => {
     try {

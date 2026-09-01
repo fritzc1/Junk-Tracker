@@ -13,6 +13,7 @@ import {
 } from '@mui/material';
 import { ArrowBack as ArrowBackIcon, Add as AddIcon } from '@mui/icons-material';
 import { api } from '../services/api';
+import { useDatabases } from '../context/DatabaseContext';
 import TagSelector from './TagSelector';
 import NewBoxDialog from './NewBoxDialog';
 import NewLocationDialog from './NewLocationDialog';
@@ -20,6 +21,7 @@ import NewLocationDialog from './NewLocationDialog';
 const ItemEntryForm = ({ mode }) => {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { activeDatabaseId } = useDatabases();
 
   const [description, setDescription] = useState('');
   const [selectedBoxId, setSelectedBoxId] = useState('');
@@ -51,13 +53,17 @@ const ItemEntryForm = ({ mode }) => {
     setSelectedLocationId(location._id);
   };
 
+  // Load options on mount and whenever the active database changes. In edit
+  // mode a stale item ID from another database simply fails to load, which is
+  // acceptable — users switch databases via the Databases page.
   useEffect(() => {
     fetchBoxes();
     fetchLocations();
     if (mode === 'edit' && id) {
       fetchItem();
     }
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeDatabaseId]);
 
   const fetchBoxes = async () => {
     try {

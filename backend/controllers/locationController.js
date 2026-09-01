@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const Location = require('../models/Location');
 const Box = require('../models/Box');
 const Item = require('../models/Item');
@@ -12,6 +13,7 @@ const getDisplayLabel = (location) => {
 // @access  Public
 const createLocation = async (req, res) => {
   try {
+    const databaseId = req.databaseId;
     const { name, subLocation } = req.body;
 
     if (!name || !name.trim()) {
@@ -21,8 +23,9 @@ const createLocation = async (req, res) => {
       });
     }
 
-    // Check composite uniqueness on (name, subLocation)
+    // Check composite uniqueness on (databaseId, name, subLocation)
     const existing = await Location.findOne({
+      databaseId,
       name: name.trim(),
       subLocation: (subLocation || '').trim()
     });
@@ -35,6 +38,7 @@ const createLocation = async (req, res) => {
     }
 
     const location = await Location.create({
+      databaseId,
       name: name.trim(),
       subLocation: (subLocation || '').trim()
     });
@@ -65,6 +69,8 @@ const createLocation = async (req, res) => {
 const getLocations = async (req, res) => {
   try {
     const locations = await Location.aggregate([
+      // Scope to the active database
+      { $match: { databaseId: new mongoose.Types.ObjectId(req.databaseId) } },
       // Lookup boxes at this location
       {
         $lookup: {
@@ -115,7 +121,8 @@ const getLocations = async (req, res) => {
 // @access  Public
 const getLocationById = async (req, res) => {
   try {
-    const location = await Location.findById(req.params.id);
+    const databaseId = req.databaseId;
+    const location = await Location.findOne({ _id: req.params.id, databaseId });
 
     if (!location) {
       return res.status(404).json({
@@ -124,8 +131,9 @@ const getLocationById = async (req, res) => {
       });
     }
 
-    const boxes = await Box.find({ locationId: req.params.id }).populate('locationId', 'name subLocation');
-    const directItems = await Item.find({ locationId: req.params.id });
+    // Scoped to the active database
+    const boxes = await Box.find({ locationId: req.params.id, databaseId }).populate('locationId', 'name subLocation');
+    const directItems = await Item.find({ locationId: req.params.id, databaseId });
 
     res.status(200).json({
       success: true,
@@ -149,9 +157,10 @@ const getLocationById = async (req, res) => {
 // @access  Public
 const updateLocation = async (req, res) => {
   try {
+    const databaseId = req.databaseId;
     const { name, subLocation } = req.body;
 
-    let location = await Location.findById(req.params.id);
+    let location = await Location.findOne({ _id: req.params.id, databaseId });
 
     if (!location) {
       return res.status(404).json({
@@ -163,9 +172,10 @@ const updateLocation = async (req, res) => {
     const newName = name !== undefined ? name.trim() : location.name;
     const newSubLocation = subLocation !== undefined ? (subLocation || '').trim() : location.subLocation;
 
-    // Check composite uniqueness on (name, subLocation) excluding current doc
+    // Check composite uniqueness on (databaseId, name, subLocation) excluding current doc
     if (newName !== location.name || newSubLocation !== location.subLocation) {
       const existing = await Location.findOne({
+        databaseId,
         name: newName,
         subLocation: newSubLocation,
         _id: { $ne: req.params.id }
@@ -200,7 +210,8 @@ const updateLocation = async (req, res) => {
 // @access  Public
 const deleteLocation = async (req, res) => {
   try {
-    const location = await Location.findById(req.params.id);
+    const databaseId = req.databaseId;
+    const location = await Location.findOne({ _id: req.params.id, databaseId });
 
     if (!location) {
       return res.status(404).json({
@@ -209,8 +220,8 @@ const deleteLocation = async (req, res) => {
       });
     }
 
-    // Check if location has boxes
-    const boxCount = await Box.countDocuments({ locationId: req.params.id });
+    // Check if location has boxes (scoped to the active database)
+    const boxCount = await Box.countDocuments({ locationId: req.params.id, databaseId });
     if (boxCount > 0) {
       return res.status(400).json({
         success: false,
@@ -218,8 +229,8 @@ const deleteLocation = async (req, res) => {
       });
     }
 
-    // Check if location has direct items
-    const itemCount = await Item.countDocuments({ locationId: req.params.id });
+    // Check if location has direct items (scoped to the active database)
+    const itemCount = await Item.countDocuments({ locationId: req.params.id, databaseId });
     if (itemCount > 0) {
       return res.status(400).json({
         success: false,

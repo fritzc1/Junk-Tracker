@@ -1,6 +1,14 @@
 const mongoose = require('mongoose');
 
 const itemSchema = new mongoose.Schema({
+  // The logical database this item belongs to (see models/Database.js).
+  // Every query is scoped to the active database via middleware.
+  databaseId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Database',
+    required: true
+  },
+
   // Human-readable description of this item (e.g., "Batteries", "Old tax documents")
   description: {
     type: String,

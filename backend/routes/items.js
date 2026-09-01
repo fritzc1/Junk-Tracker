@@ -161,6 +161,9 @@ router.post('/import', upload.single('file'), async (req, res) => {
       return res.status(400).json({ success: false, error: 'No file uploaded' });
     }
 
+    // All imported data belongs to the active database (X-Database-Id header)
+    const databaseId = req.databaseId;
+
     const Box = require('../models/Box');
     const Item = require('../models/Item');
     const Location = require('../models/Location');
@@ -230,14 +233,14 @@ router.post('/import', upload.single('file'), async (req, res) => {
           const name = part.trim().toLowerCase();
           if (!name || tagIdMap.has(name)) continue;
 
-          let tag = await Tag.findOne({ name });
+          let tag = await Tag.findOne({ name, databaseId });
           if (!tag) {
             try {
-              tag = await Tag.create({ name });
+              tag = await Tag.create({ name, databaseId });
               console.log(`[IMPORT] Created tag: "${name}"`);
             } catch (e) {
               // Likely a race on the unique index — re-fetch
-              tag = await Tag.findOne({ name });
+              tag = await Tag.findOne({ name, databaseId });
             }
           }
           if (tag) tagIdMap.set(name, tag._id);
@@ -261,21 +264,21 @@ router.post('/import', upload.single('file'), async (req, res) => {
         const key = `${locName}|${subLoc}`;
         if (locationMap.has(key)) continue;
 
-        // Upsert: match on name first, then composite (name + subLocation)
-        let loc = await Location.findOne({ name: locName });
+        // Upsert (scoped to the active database): match on name first, then composite
+        let loc = await Location.findOne({ name: locName, databaseId });
         if (loc && (!subLoc || loc.subLocation === subLoc)) {
           locationMap.set(key, loc._id);
         } else if (loc) {
-          const exact = await Location.findOne({ name: locName, subLocation: subLoc });
+          const exact = await Location.findOne({ name: locName, subLocation: subLoc, databaseId });
           if (exact) {
             locationMap.set(key, exact._id);
           } else {
-            const newLoc = await Location.create({ name: locName, subLocation: subLoc });
+            const newLoc = await Location.create({ databaseId, name: locName, subLocation: subLoc });
             locationMap.set(key, newLoc._id);
             console.log(`[IMPORT] Created location: "${locName}"${subLoc ? ` — ${subLoc}` : ''}`);
           }
         } else {
-          const newLoc = await Location.create({ name: locName, subLocation: subLoc });
+          const newLoc = await Location.create({ databaseId, name: locName, subLocation: subLoc });
           locationMap.set(key, newLoc._id);
           console.log(`[IMPORT] Created location: "${locName}"${subLoc ? ` — ${subLoc}` : ''}`);
         }
@@ -306,7 +309,7 @@ router.post('/import', upload.single('file'), async (req, res) => {
           }
         }
 
-        let existingBox = await Box.findOne({ boxId: boxIdValue });
+        let existingBox = await Box.findOne({ boxId: boxIdValue, databaseId });
         if (existingBox) {
           if (locId) existingBox.locationId = locId;
           await existingBox.save();
@@ -314,6 +317,7 @@ router.post('/import', upload.single('file'), async (req, res) => {
           console.log(`[IMPORT] Updated existing box: ${boxIdValue}`);
         } else {
           const newBox = await Box.create({
+            databaseId,
             locationId: locId,
             boxId: boxIdValue
           });
@@ -351,8 +355,8 @@ router.post('/import', upload.single('file'), async (req, res) => {
           if (locationMap.has(key)) {
             locationIdRef = locationMap.get(key);
           } else {
-            // Location entity wasn't pre-created — create it now
-            const newLoc = await Location.create({ name: locName, subLocation: subLoc });
+            // Location entity wasn't pre-created — create it now (scoped)
+            const newLoc = await Location.create({ databaseId, name: locName, subLocation: subLoc });
             locationMap.set(key, newLoc._id);
             locationIdRef = newLoc._id;
           }
@@ -373,6 +377,7 @@ router.post('/import', upload.single('file'), async (req, res) => {
 
       // Imported timestamps — omit when unparseable so schema defaults apply
       const doc = {
+        databaseId,
         description,
         boxId: boxIdRef,
         locationId: locationIdRef,

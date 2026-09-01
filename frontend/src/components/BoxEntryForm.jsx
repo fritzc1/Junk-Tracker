@@ -10,6 +10,7 @@ import {
 } from '@mui/material';
 import { ArrowBack as ArrowBackIcon, Add as AddIcon } from '@mui/icons-material';
 import { api } from '../services/api';
+import { useDatabases } from '../context/DatabaseContext';
 import LocationEntryForm from './LocationEntryForm';
 
 /**
@@ -33,6 +34,7 @@ import LocationEntryForm from './LocationEntryForm';
  *   onCancel         - optional; when provided, renders a Cancel button that calls it
  */
 const BoxEntryForm = ({ mode = 'create', id, onSaved, allowNewLocation = false, onCancel }) => {
+  const { activeDatabaseId } = useDatabases();
   const [boxIdValue, setBoxIdValue] = useState('');
   const [selectedLocationId, setSelectedLocationId] = useState('');
   const [locations, setLocations] = useState([]);
@@ -52,6 +54,9 @@ const BoxEntryForm = ({ mode = 'create', id, onSaved, allowNewLocation = false, 
   // onSaved so the parent can add it to its own options list.
   const [createdLocation, setCreatedLocation] = useState(null);
 
+  // Load options on mount and whenever the active database changes. In edit
+  // mode a stale box ID from another database simply fails to load, which is
+  // acceptable — users switch databases via the Databases page.
   useEffect(() => {
     fetchLocations();
     fetchExistingBoxIds();
@@ -59,7 +64,7 @@ const BoxEntryForm = ({ mode = 'create', id, onSaved, allowNewLocation = false, 
       fetchBox();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [activeDatabaseId]);
 
   const fetchLocations = async () => {
     try {

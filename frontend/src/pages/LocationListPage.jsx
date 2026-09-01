@@ -29,6 +29,7 @@ import {
   Storage as StorageIcon,
 } from '@mui/icons-material';
 import { api } from '../services/api';
+import { useDatabases } from '../context/DatabaseContext';
 import SearchBar from '../components/SearchBar';
 import PaginationBar from '../components/PaginationBar';
 import useRowsPerPage from '../hooks/useRowsPerPage';
@@ -77,10 +78,14 @@ const LocationListPage = () => {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [locationToDelete, setLocationToDelete] = useState(null);
   const navigate = useNavigate();
+  const { activeDatabaseId } = useDatabases();
 
+  // Load locations on mount and whenever the active database changes.
   useEffect(() => {
+    setPage(0);
     fetchLocations();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeDatabaseId]);
 
   const fetchLocations = async () => {
     try {

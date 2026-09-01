@@ -8,9 +8,11 @@ import BoxEntryPage from './pages/BoxEntryPage';
 import LocationListPage from './pages/LocationListPage';
 import LocationEntryPage from './pages/LocationEntryPage';
 import TagListPage from './pages/TagListPage';
+import DatabasesPage from './pages/DatabasesPage';
 import SettingsPage from './pages/SettingsPage';
 import NavBar from './components/NavBar';
 import ErrorBoundary from './components/ErrorBoundary';
+import { DatabaseProvider } from './context/DatabaseContext';
 
 const theme = createTheme({
   palette: {
@@ -33,25 +35,28 @@ function App() {
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
-      <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-        <ErrorBoundary>
-          <NavBar />
-          <Routes>
-            <Route path="/" element={<ItemListPage />} />
-            <Route path="/entry" element={<ItemEntryPage mode="create" />} />
-            <Route path="/edit/:id" element={<ItemEntryPage mode="edit" />} />
-            <Route path="/items" element={<ItemListPage />} />
-            <Route path="/boxes" element={<BoxListPage />} />
-            <Route path="/box-entry" element={<BoxEntryPage mode="create" />} />
-            <Route path="/box-edit/:id" element={<BoxEntryPage mode="edit" />} />
-            <Route path="/locations" element={<LocationListPage />} />
-            <Route path="/location-entry" element={<LocationEntryPage mode="create" />} />
-            <Route path="/location-edit/:id" element={<LocationEntryPage mode="edit" />} />
-            <Route path="/tags" element={<TagListPage />} />
-            <Route path="/settings" element={<SettingsPage />} />
-          </Routes>
-        </ErrorBoundary>
-      </Router>
+      <DatabaseProvider>
+        <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+          <ErrorBoundary>
+            <NavBar />
+            <Routes>
+              <Route path="/" element={<ItemListPage />} />
+              <Route path="/entry" element={<ItemEntryPage mode="create" />} />
+              <Route path="/edit/:id" element={<ItemEntryPage mode="edit" />} />
+              <Route path="/items" element={<ItemListPage />} />
+              <Route path="/boxes" element={<BoxListPage />} />
+              <Route path="/box-entry" element={<BoxEntryPage mode="create" />} />
+              <Route path="/box-edit/:id" element={<BoxEntryPage mode="edit" />} />
+              <Route path="/locations" element={<LocationListPage />} />
+              <Route path="/location-entry" element={<LocationEntryPage mode="create" />} />
+              <Route path="/location-edit/:id" element={<LocationEntryPage mode="edit" />} />
+              <Route path="/tags" element={<TagListPage />} />
+              <Route path="/databases" element={<DatabasesPage />} />
+              <Route path="/settings" element={<SettingsPage />} />
+            </Routes>
+          </ErrorBoundary>
+        </Router>
+      </DatabaseProvider>
     </ThemeProvider>
   );
 }

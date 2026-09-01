@@ -3,6 +3,7 @@ const cors = require('cors');
 const mongoose = require('mongoose');
 const connectDB = require('./config/db');
 const { normalizeBoxId } = require('./utils/boxId');
+const requireDatabase = require('./middleware/requireDatabase');
 
 // Indexes are synced explicitly in main() — after the boxId case migration and
 // the index swap below — so startup ordering is deterministic.
@@ -80,16 +81,20 @@ async function migrateBoxIdsToUppercase() {
   }
 }
 
-// Swap the sparse unique index on boxes.boxId to a case-insensitive collation.
-// Defense-in-depth: even if a future write path bypasses normalizeBoxId, the
+// Ensure the case-insensitive UNIQUE box ID index is in place. Uniqueness is
+// per-database (compound with databaseId) so the same physical label can exist
+// in multiple databases; the partial filter limits the index to boxes that have
+// a non-empty ID, and the collation makes uniqueness case-insensitive as
+// defense-in-depth: even if a future write path bypasses normalizeBoxId, the
 // index rejects "a06" when "A06" exists instead of silently creating a twin.
 async function ensureCaseInsensitiveBoxIndex() {
   const collection = mongoose.connection.collection('boxes');
+
+  // Drop any legacy global-unique boxId index (pre-multi-database).
   try {
     const indexes = await collection.indexes();
-    const existing = indexes.find(idx => idx.name === 'boxId_1');
-    if (existing && !existing.options?.collation) {
-      console.log('[Startup] Swapping boxes.boxId index to case-insensitive collation...');
+    if (indexes.some(idx => idx.name === 'boxId_1')) {
+      console.log('[Startup] Dropping legacy global boxes.boxId unique index...');
       await collection.dropIndex('boxId_1');
     }
   } catch (err) {
@@ -98,10 +103,103 @@ async function ensureCaseInsensitiveBoxIndex() {
       console.warn('[Startup] Could not inspect boxes indexes:', err.message);
     }
   }
+
   await collection.createIndex(
-    { boxId: 1 },
-    { sparse: true, unique: true, collation: { locale: 'en', strength: 2 } }
+    { databaseId: 1, boxId: 1 },
+    {
+      unique: true,
+      collation: { locale: 'en', strength: 2 },
+      // ($gt instead of $ne — MongoDB partial filters don't support $ne)
+      partialFilterExpression: { $and: [{ boxId: { $type: 'string' } }, { boxId: { $gt: '' } }] }
+    }
   );
+}
+
+// One-time migration for multi-database support. Creates the "Default"
+// database, backfills every existing data document with its ID (so pre-existing
+// data is preserved and visible), then swaps the old global-unique indexes to
+// per-database compound unique indexes so e.g. box "A06" can exist in multiple
+// databases. Idempotent: safe to run on every startup.
+async function migrateToMultiDatabase() {
+  const Database = require('./models/Database');
+
+  // 1) Ensure a Default database exists (first run only).
+  let defaultDb = await Database.findOne({ name: 'Default' });
+  if (!defaultDb) {
+    defaultDb = await Database.create({ name: 'Default' });
+    console.log('[Migration] Created "Default" database');
+  }
+
+  // 2) Backfill databaseId on any documents that lack it (first run only).
+  const collections = ['items', 'boxes', 'locations', 'tags'];
+  for (const name of collections) {
+    try {
+      const result = await mongoose.connection.collection(name).updateMany(
+        { databaseId: { $exists: false } },
+        { $set: { databaseId: defaultDb._id } }
+      );
+      if (result.modifiedCount > 0) {
+        console.log(`[Migration] Backfilled databaseId on ${result.modifiedCount} ${name}`);
+      }
+    } catch (err) {
+      // Collection may not exist yet — nothing to backfill.
+      if (!/not found|NamespaceNotFound/i.test(err.message)) throw err;
+    }
+  }
+
+  // 3) Swap global-unique indexes for per-database compound unique indexes.
+  const boxes = mongoose.connection.collection('boxes');
+  try {
+    const boxIndexes = await boxes.indexes();
+    if (boxIndexes.some(idx => idx.name === 'boxId_1')) {
+      console.log('[Migration] Swapping boxes.boxId index to per-database compound index...');
+      await boxes.dropIndex('boxId_1');
+    }
+    // Replace an earlier sparse compound index with the partial one (sparse
+    // would collide on ID-less boxes since databaseId is always present).
+    const oldCompound = boxIndexes.find(idx => idx.name === 'databaseId_1_boxId_1' && !idx.options?.partialFilterExpression);
+    if (oldCompound) {
+      console.log('[Migration] Replacing sparse compound box index with partial unique index...');
+      await boxes.dropIndex('databaseId_1_boxId_1');
+    }
+  } catch (err) {
+    if (!/not found|NamespaceNotFound/i.test(err.message)) throw err;
+  }
+  await boxes.createIndex(
+    { databaseId: 1, boxId: 1 },
+    {
+      unique: true,
+      collation: { locale: 'en', strength: 2 },
+      // ($gt instead of $ne — MongoDB partial filters don't support $ne)
+      partialFilterExpression: { $and: [{ boxId: { $type: 'string' } }, { boxId: { $gt: '' } }] }
+    }
+  );
+
+  const locations = mongoose.connection.collection('locations');
+  try {
+    const locIndexes = await locations.indexes();
+    if (locIndexes.some(idx => idx.name === 'name_1_subLocation_1')) {
+      console.log('[Migration] Swapping locations index to per-database compound index...');
+      await locations.dropIndex('name_1_subLocation_1');
+    }
+  } catch (err) {
+    if (!/not found|NamespaceNotFound/i.test(err.message)) throw err;
+  }
+  await locations.createIndex({ databaseId: 1, name: 1, subLocation: 1 }, { unique: true });
+
+  const tags = mongoose.connection.collection('tags');
+  try {
+    const tagIndexes = await tags.indexes();
+    if (tagIndexes.some(idx => idx.name === 'name_1')) {
+      console.log('[Migration] Swapping tags.name index to per-database compound index...');
+      await tags.dropIndex('name_1');
+    }
+  } catch (err) {
+    if (!/not found|NamespaceNotFound/i.test(err.message)) throw err;
+  }
+  await tags.createIndex({ databaseId: 1, name: 1 }, { unique: true });
+
+  console.log('[Migration] Multi-database migration complete');
 }
 
 async function main() {
@@ -109,19 +207,25 @@ async function main() {
   await connectDB();
 
   // Startup migrations — must complete before the server accepts requests.
+  // Order matters: the boxId case migration runs while the old global-unique
+  // index is still in place; migrateToMultiDatabase then swaps it for the
+  // per-database compound index.
   await dropStaleLocationIndex();
   await migrateBoxIdsToUppercase();
+  await migrateToMultiDatabase();
 
   // Sync schema indexes (autoIndex is off; this is explicit and ordered).
   const Box = require('./models/Box');
   const Item = require('./models/Item');
   const Location = require('./models/Location');
   const Tag = require('./models/Tag');
+  const Database = require('./models/Database');
   await Promise.all([
     Box.syncIndexes(),
     Item.syncIndexes(),
     Location.syncIndexes(),
-    Tag.syncIndexes()
+    Tag.syncIndexes(),
+    Database.syncIndexes()
   ]);
 
   // Final index check: guarantees the case-insensitive unique boxId index is in
@@ -139,24 +243,29 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Routes
-app.use('/api/items', require('./routes/items'));
-app.use('/api/tags', require('./routes/tags'));
-app.use('/api/locations', require('./routes/locations'));
-app.use('/api/boxes', require('./routes/boxes'));
+// Routes — all data routes are scoped to the active logical database, resolved
+// from the X-Database-Id header (see middleware/requireDatabase.js).
+app.use('/api/items', requireDatabase, require('./routes/items'));
+app.use('/api/tags', requireDatabase, require('./routes/tags'));
+app.use('/api/locations', requireDatabase, require('./routes/locations'));
+app.use('/api/boxes', requireDatabase, require('./routes/boxes'));
+
+// Database management routes (not scoped — they manage the databases themselves)
+app.use('/api/databases', require('./routes/databases'));
 
 // @route   DELETE /api/data/clear-all
-// @desc    Wipe ALL data (items, boxes, locations, tags, and any leftover customfields)
-app.delete('/api/data/clear-all', async (req, res) => {
+// @desc    Wipe ALL data in the ACTIVE database (items, boxes, locations, tags, and any leftover customfields)
+app.delete('/api/data/clear-all', requireDatabase, async (req, res) => {
   try {
     const db = mongoose.connection.db;
     if (!db) throw new Error('Database not connected');
+    const databaseId = new mongoose.Types.ObjectId(req.databaseId);
     await Promise.all([
-      db.collection('items').deleteMany({}),
-      db.collection('boxes').deleteMany({}),
-      db.collection('locations').deleteMany({}),
-      db.collection('tags').deleteMany({}),
-      // Leftover collection from the removed custom-column feature
+      db.collection('items').deleteMany({ databaseId }),
+      db.collection('boxes').deleteMany({ databaseId }),
+      db.collection('locations').deleteMany({ databaseId }),
+      db.collection('tags').deleteMany({ databaseId }),
+      // Leftover collection from the removed custom-column feature (global)
       db.collection('customfields').deleteMany({})
     ]);
     res.status(200).json({ success: true, message: 'All data cleared', data: {} });

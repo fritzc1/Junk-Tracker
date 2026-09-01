@@ -24,3 +24,6 @@ Storage Boxes Contents 2025 - APP IMPORT COPY.xlsx
 Thumbs.db
 Desktop.ini
 .DS_Store
+
+# Playwright MCP test artifacts (console logs, page snapshots)
+.playwright-mcp/

@@ -6,6 +6,7 @@ import {
   Alert,
 } from '@mui/material';
 import { api } from '../services/api';
+import { useDatabases } from '../context/DatabaseContext';
 
 /**
  * Reusable location create/edit form.
@@ -23,6 +24,7 @@ import { api } from '../services/api';
  *   onCancel     - optional; when provided, renders a Cancel button that calls it
  */
 const LocationEntryForm = ({ mode = 'create', id, initialValues, onSaved, onCancel }) => {
+  const { activeDatabaseId } = useDatabases();
   const [name, setName] = useState(initialValues?.name || '');
   const [subLocation, setSubLocation] = useState(initialValues?.subLocation || '');
   const [loading, setLoading] = useState(mode === 'edit');
@@ -46,13 +48,13 @@ const LocationEntryForm = ({ mode = 'create', id, initialValues, onSaved, onCanc
     }
   };
 
-  // Load existing location in edit mode
+  // Load existing location in edit mode; re-runs when the active database changes
   useEffect(() => {
     if (mode === 'edit' && id) {
       fetchLocation();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [activeDatabaseId]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();

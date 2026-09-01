@@ -1,6 +1,13 @@
 const mongoose = require('mongoose');
 
 const locationSchema = new mongoose.Schema({
+  // The logical database this location belongs to (see models/Database.js).
+  databaseId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Database',
+    required: true
+  },
+
   // Human-readable location name (e.g., "Garage", "Theater", "Office")
   name: {
     type: String,
@@ -28,8 +35,9 @@ const locationSchema = new mongoose.Schema({
   }
 });
 
-// Composite unique index on (name, subLocation)
-locationSchema.index({ name: 1, subLocation: 1 }, { unique: true });
+// Composite unique index on (databaseId, name, subLocation) — uniqueness is
+// per-database so the same location can exist in multiple databases.
+locationSchema.index({ databaseId: 1, name: 1, subLocation: 1 }, { unique: true });
 
 // Virtual for display label: "Garage — Shelf 43" or just "Office"
 locationSchema.virtual('displayLabel').get(function() {

@@ -21,6 +21,8 @@ import {
   TableHead,
   TableRow,
   TextField,
+  ToggleButton,
+  ToggleButtonGroup,
   Tooltip,
   Typography,
   Alert,
@@ -35,6 +37,7 @@ import {
   Save as SaveIcon,
 } from '@mui/icons-material';
 import { api } from '../services/api';
+import { useDatabases } from '../context/DatabaseContext';
 import SearchBar from '../components/SearchBar';
 import PaginationBar from '../components/PaginationBar';
 import useRowsPerPage from '../hooks/useRowsPerPage';
@@ -44,9 +47,9 @@ import useRowsPerPage from '../hooks/useRowsPerPage';
 //   Item Description        → item.description
 //   Box ID                  → box.boxId
 const FIXED_COLUMNS = [
+  { key: 'description', label: 'Item Description' },
   { key: 'location', label: 'Location' },
   { key: 'subLocation', label: 'Sub-Location' },
-  { key: 'description', label: 'Item Description' },
   { key: 'boxId', label: 'Box ID' },
 ];
 
@@ -130,6 +133,7 @@ const ItemListPage = () => {
   const [bulkEditDescriptionChanged, setBulkEditDescriptionChanged] = useState(false);
   const [bulkEditTags, setBulkEditTags] = useState(null);     // null = various/unchanged, array = unified value
   const [bulkEditTagsChanged, setBulkEditTagsChanged] = useState(false);
+  const [bulkEditTagMode, setBulkEditTagMode] = useState('replace'); // 'replace' | 'add' (append to existing)
   const [bulkEditBoxId, setBulkEditBoxId] = useState('');       // prefilled shared box id ('' when none/various)
   const [bulkEditBoxTouched, setBulkEditBoxTouched] = useState(false);
   const [bulkEditLocationId, setBulkEditLocationId] = useState(''); // prefilled shared direct location id ('' when none/various)
@@ -142,6 +146,7 @@ const ItemListPage = () => {
   const [sortConfig, setSortConfig] = useState({ field: null, direction: 'asc' });
 
   const navigate = useNavigate();
+  const { activeDatabaseId } = useDatabases();
 
   // Active box filter from URL (?boxId=...) — set by "View Items" on the Boxes page.
   // The URL param is the single source of truth so deep links and back-button work correctly.
@@ -163,12 +168,18 @@ const ItemListPage = () => {
     setSearchParams(next);
   };
 
+  // Load data on mount and whenever the active database changes (clearing any
+  // stale selection that belongs to a different database).
   useEffect(() => {
+    setSelectedItems(new Set());
+    setAnchorItemId(null);
+    setPage(0);
     fetchBoxes();
     fetchItems();
     fetchLocations();
     fetchTags();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeDatabaseId]);
 
   // Reset pagination whenever the box or tag filter changes or is cleared
   useEffect(() => {
@@ -425,6 +436,27 @@ const ItemListPage = () => {
     }
   );
 
+  // Shared tag prefill for replace mode: array if all items share one tag set (possibly empty), null if various.
+  const getSharedTagPrefill = () => {
+    const tagSets = selectedItemsList.map(item =>
+      (item.tags || []).map(t => t.name.toLowerCase()).sort().join(',')
+    );
+    const uniqueTagSets = new Set(tagSets);
+    if (uniqueTagSets.size === 1) {
+      return tagSets[0] ? tagSets[0].split(',').filter(Boolean) : [];
+    }
+    return null; // various
+  };
+
+  // Switching modes resets the tags field to its initial state for that mode:
+  // replace → shared prefill (or various), add → empty (only entering new tags).
+  const handleBulkTagModeChange = (newMode) => {
+    if (!newMode || newMode === bulkEditTagMode) return;
+    setBulkEditTagMode(newMode);
+    setBulkEditTagsChanged(false);
+    setBulkEditTags(newMode === 'add' ? [] : getSharedTagPrefill());
+  };
+
   // Initialize bulk edit form when dialog opens: prefill shared values, reset touched flags.
   const openBulkEdit = () => {
     setBulkEditDescriptionChanged(false);
@@ -444,18 +476,9 @@ const ItemListPage = () => {
     const locIds = new Set(selectedItemsList.map(item => String(item.locationId?._id || '')));
     setBulkEditLocationId(locIds.size === 1 ? locIds.values().next().value : '');
 
-    // Compute tags: if all items share the exact same tag set, use it; otherwise null (various)
-    const tagSets = selectedItemsList.map(item =>
-      (item.tags || []).map(t => t.name.toLowerCase()).sort().join(',')
-    );
-    const uniqueTagSets = new Set(tagSets);
-    if (uniqueTagSets.size === 1 && tagSets[0]) {
-      setBulkEditTags(tagSets[0].split(',').filter(Boolean));
-    } else if (uniqueTagSets.size === 1 && !tagSets[0]) {
-      setBulkEditTags([]);
-    } else {
-      setBulkEditTags(null); // various
-    }
+    // Tags: reset to replace mode and prefill the shared tag set (or null = various).
+    setBulkEditTagMode('replace');
+    setBulkEditTags(getSharedTagPrefill());
 
     setBulkEditOpen(true);
   };
@@ -495,12 +518,22 @@ const ItemListPage = () => {
 
       // --- Update Item documents for description, tags, and box/location (XOR) ---
       const itemPromises = Array.from(selectedItems).map(async (itemId) => {
+        const item = items.find(i => i._id === itemId);
         const payload = {};
         if (bulkEditDescriptionChanged) {
           payload.description = bulkEditDescription.trim();
         }
         if (bulkEditTagsChanged) {
-          payload.tagNames = bulkEditTags.map(name => name.toLowerCase());
+          if (bulkEditTagMode === 'add') {
+            // Append to each item's existing tags, deduped case-insensitively. Empty field = no-op.
+            if (bulkEditTags.length > 0) {
+              const merged = new Set((item?.tags || []).map(t => t.name.toLowerCase()));
+              for (const name of bulkEditTags) merged.add(name.toLowerCase());
+              payload.tagNames = [...merged];
+            }
+          } else {
+            payload.tagNames = bulkEditTags.map(name => name.toLowerCase());
+          }
         }
         // Box/location: send explicitly when touched so clearing actually removes the reference.
         // XOR mirrors ItemEntryForm: assigning a box clears any direct location, and vice versa.
@@ -824,7 +857,18 @@ const ItemListPage = () => {
 
           {/* Tags section */}
           <Box sx={{ mb: 3 }}>
-            {bulkEditTags === null && (
+            <ToggleButtonGroup
+              size="small"
+              exclusive
+              value={bulkEditTagMode}
+              onChange={(e, newMode) => handleBulkTagModeChange(newMode)}
+              aria-label="Tag edit mode"
+              sx={{ mb: 1.5 }}
+            >
+              <ToggleButton value="replace">Replace</ToggleButton>
+              <ToggleButton value="add">Add to existing</ToggleButton>
+            </ToggleButtonGroup>
+            {bulkEditTagMode === 'replace' && bulkEditTags === null && (
               <Typography variant="caption" color="warning.main" sx={{ display: 'block', mb: 1 }}>
                 Various — items have different tags. Setting new tags will replace all existing tags on selected items.
               </Typography>
@@ -843,20 +887,23 @@ const ItemListPage = () => {
                 <TextField
                   {...params}
                   label="Tags"
-                  placeholder={bulkEditTags === null ? 'Type to set tags for all items...' : 'Add tags...'}
+                  placeholder={bulkEditTagMode === 'add' ? 'Type a tag and press Enter to add it...' : (bulkEditTags === null ? 'Type to set tags for all items...' : 'Add tags...')}
+                  helperText={bulkEditTagMode === 'add' ? "Adds to each item's existing tags; duplicates are ignored." : 'Replaces all existing tags on selected items.'}
                   sx={{ backgroundColor: bulkEditTagsChanged ? '#c8e6c9' : (bulkEditTags === null ? '#fff3e0' : 'inherit'), borderRadius: 1 }}
                 />
               )}
             />
-            <Box sx={{ mt: 1 }}>
-              <Button
-                size="small"
-                color="error"
-                onClick={() => { setBulkEditTags([]); setBulkEditTagsChanged(true); }}
-              >
-                Remove All Tags
-              </Button>
-            </Box>
+            {bulkEditTagMode === 'replace' && (
+              <Box sx={{ mt: 1 }}>
+                <Button
+                  size="small"
+                  color="error"
+                  onClick={() => { setBulkEditTags([]); setBulkEditTagsChanged(true); }}
+                >
+                  Remove All Tags
+                </Button>
+              </Box>
+            )}
           </Box>
 
           <Divider sx={{ my: 2 }} />
