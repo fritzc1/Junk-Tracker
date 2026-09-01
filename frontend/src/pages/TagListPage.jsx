@@ -26,7 +26,7 @@ import {
   Add as AddIcon,
   Edit as EditIcon,
   Delete as DeleteIcon,
-  List as ListIcon,
+  FormatListBulleted as FormatListBulletedIcon,
 } from '@mui/icons-material';
 import { api } from '../services/api';
 import { useDatabases } from '../context/DatabaseContext';
@@ -138,6 +138,7 @@ const TagListPage = () => {
 
   const handleChangePage = (event, newPage) => {
     setPage(newPage);
+    window.scrollTo({ top: 0 }); // land at the top of the table after paging
   };
 
   return (
@@ -205,7 +206,7 @@ const TagListPage = () => {
                   <TableCell align="right">
                     <Tooltip title="View Items">
                       <IconButton onClick={() => handleViewItems(tag)} size="small">
-                        <ListIcon />
+                        <FormatListBulletedIcon />
                       </IconButton>
                     </Tooltip>
                     <Tooltip title="Edit Tag">
@@ -225,6 +226,17 @@ const TagListPage = () => {
           </TableBody>
         </Table>
       </TableContainer>
+
+      <PaginationBar
+        variant="bottom"
+        sx={{ mt: 1 }}
+        count={tags.length}
+        page={page}
+        onPageChange={handleChangePage}
+        rowsPerPage={rowsPerPage}
+        onRowsPerPageChange={handleChangeRowsPerPage}
+        rowsPerPageOptions={[5, 10, 25, 50, { label: 'All', value: -1 }]}
+      />
 
       {/* Edit/Create Dialog */}
       <Dialog open={editOpen} onClose={handleCloseEdit}>

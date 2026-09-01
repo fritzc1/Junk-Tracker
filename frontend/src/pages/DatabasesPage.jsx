@@ -1,5 +1,4 @@
 import React, { useState, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
 import {
   Alert,
   Box,
@@ -61,7 +60,6 @@ const parseJsonResponse = async (response) => {
 };
 
 const DatabasesPage = () => {
-  const navigate = useNavigate();
   const { databases, activeDatabase, selectDatabase, refreshDatabases, loading: dbLoading } = useDatabases();
 
   // ---- Create / rename state ----
@@ -156,7 +154,6 @@ const DatabasesPage = () => {
 
   const handleSelectDatabase = (db) => {
     selectDatabase(db._id);
-    navigate('/'); // show the items of the newly selected database
   };
 
   // ---- Export (scoped to the active database) ----
@@ -258,7 +255,6 @@ const DatabasesPage = () => {
         setImportFile(null);
         flashSuccess(`Imported ${result.count} item(s) into "${activeDatabase?.name || 'database'}"`);
         refreshDatabases(); // update item counts
-        navigate('/'); // show the freshly imported items
       } else {
         flashError(result.error || 'Failed to import file');
       }
@@ -294,7 +290,6 @@ const DatabasesPage = () => {
         setClearDialogOpen(false);
         flashSuccess(`Cleared all data from "${activeDatabase?.name || 'database'}"`);
         refreshDatabases(); // update item counts
-        navigate('/'); // show the now-empty items list
       } else {
         flashError(result.error || 'Failed to clear database');
       }
@@ -342,7 +337,7 @@ const DatabasesPage = () => {
                   <TableCell>Name</TableCell>
                   <TableCell align="right">Items</TableCell>
                   <TableCell align="center">Active</TableCell>
-                  <TableCell align="right" sx={{ width: 120 }} />
+                  <TableCell align="right" sx={{ width: 90 }} />
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -353,24 +348,23 @@ const DatabasesPage = () => {
                     </TableCell>
                     <TableCell align="right">{db.itemCount}</TableCell>
                     <TableCell align="center">
-                      {db._id === activeDatabase?._id && (
+                      {db._id === activeDatabase?._id ? (
                         <Chip size="small" color="primary" icon={<CheckCircleIcon />} label="Active" />
+                      ) : (
+                        <Tooltip title={`Set "${db.name}" as the active database`}>
+                          <Chip
+                            size="small"
+                            variant="outlined"
+                            role="button"
+                            tabIndex={0}
+                            aria-label={`Activate ${db.name}`}
+                            onClick={() => handleSelectDatabase(db)}
+                            label="Activate"
+                          />
+                        </Tooltip>
                       )}
                     </TableCell>
                     <TableCell align="right">
-                      <Tooltip title={db._id === activeDatabase?._id ? 'Already selected' : 'Select this database'}>
-                        <span>
-                          <IconButton
-                            size="small"
-                            color={db._id === activeDatabase?._id ? 'default' : 'primary'}
-                            disabled={db._id === activeDatabase?._id}
-                            onClick={() => handleSelectDatabase(db)}
-                            aria-label={`Select ${db.name}`}
-                          >
-                            <CheckCircleIcon />
-                          </IconButton>
-                        </span>
-                      </Tooltip>
                       <Tooltip title="Rename">
                         <IconButton size="small" onClick={() => { setRenameTarget(db); setRenameValue(db.name); }} aria-label={`Rename ${db.name}`}>
                           <EditIcon fontSize="small" />

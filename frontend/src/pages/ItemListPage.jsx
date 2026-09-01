@@ -159,6 +159,16 @@ const ItemListPage = () => {
     setSearchParams(next);
   };
 
+  // Active location filter from URL (?locationId=...) — set by "View Items" on the Locations page.
+  // Matches both loose items (direct location) and items inside boxes at that location.
+  const locationFilterId = searchParams.get('locationId');
+
+  const clearLocationFilter = () => {
+    const next = new URLSearchParams(searchParams);
+    next.delete('locationId');
+    setSearchParams(next);
+  };
+
   // Active tag filter from URL (?tagId=...) — set by "View Items" on the Tags page.
   const tagFilterId = searchParams.get('tagId');
 
@@ -181,10 +191,10 @@ const ItemListPage = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeDatabaseId]);
 
-  // Reset pagination whenever the box or tag filter changes or is cleared
+  // Reset pagination whenever the location, box, or tag filter changes or is cleared
   useEffect(() => {
     setPage(0);
-  }, [boxFilterId, tagFilterId]);
+  }, [locationFilterId, boxFilterId, tagFilterId]);
 
   const fetchBoxes = async () => {
     try {
@@ -341,6 +351,21 @@ const ItemListPage = () => {
     return searchCriteria.every(criterion => matchesCriterion(item, criterion));
   };
 
+  // Pre-filter by active location from URL (?locationId=...) before search/sort/pagination.
+  // An item matches when its direct location OR the location of its box equals the filter,
+  // so both loose items and items inside boxes at that location are included.
+  const matchesLocationFilter = (item) => {
+    const target = String(locationFilterId);
+    const directRef = item.locationId;
+    const directId = directRef && typeof directRef === 'object' ? directRef._id : directRef;
+    if (directId && String(directId) === target) return true;
+    const boxLocRef = item.boxId?.locationId;
+    const boxLocId = boxLocRef && typeof boxLocRef === 'object' ? boxLocRef._id : boxLocRef;
+    return !!(boxLocId && String(boxLocId) === target);
+  };
+
+  const locationFilteredItems = locationFilterId ? items.filter(matchesLocationFilter) : items;
+
   // Pre-filter by active box from URL (?boxId=...) before search/sort/pagination.
   // Items without a box are excluded when the filter is active.
   const matchesBoxFilter = (item) => {
@@ -348,7 +373,7 @@ const ItemListPage = () => {
     return String(item.boxId._id) === String(boxFilterId);
   };
 
-  const boxFilteredItems = boxFilterId ? items.filter(matchesBoxFilter) : items;
+  const boxFilteredItems = boxFilterId ? locationFilteredItems.filter(matchesBoxFilter) : locationFilteredItems;
 
   // Label for the active filter chip (resolved from the boxes list)
   const boxFilterLabel = useMemo(() => {
@@ -356,6 +381,14 @@ const ItemListPage = () => {
     const match = boxes.find(b => String(b._id) === String(boxFilterId));
     return match?.boxId || 'Unknown box';
   }, [boxes, boxFilterId]);
+
+  // Label for the active location filter chip (resolved from the locations list)
+  const locationFilterLabel = useMemo(() => {
+    if (!locationFilterId) return '';
+    const match = locations.find(l => String(l._id) === String(locationFilterId));
+    if (!match) return 'Unknown location';
+    return match.subLocation ? `${match.name} — ${match.subLocation}` : match.name;
+  }, [locations, locationFilterId]);
 
   // Pre-filter by active tag from URL (?tagId=...) before search/sort/pagination.
   // Items without the tag are excluded when the filter is active.
@@ -571,6 +604,7 @@ const ItemListPage = () => {
 
   const handleChangePage = (event, newPage) => {
     setPage(newPage);
+    window.scrollTo({ top: 0 }); // land at the top of the table after paging
   };
 
   const handleSelectAll = (event) => {
@@ -666,8 +700,11 @@ const ItemListPage = () => {
         clearAll={clearSearchCriteria}
       />
 
-      {(boxFilterId || tagFilterId) && (
+      {(locationFilterId || boxFilterId || tagFilterId) && (
         <Box sx={{ mb: 2, display: 'flex', gap: 1 }}>
+          {locationFilterId && (
+            <Chip label={`Location: ${locationFilterLabel}`} color="success" onDelete={clearLocationFilter} />
+          )}
           {boxFilterId && (
             <Chip label={`Box: ${boxFilterLabel}`} color="primary" onDelete={clearBoxFilter} />
           )}
@@ -743,11 +780,13 @@ const ItemListPage = () => {
             ) : sortedItems.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={totalColumns} align="center">
-                  {boxFilterId && !tagFilterId && boxFilteredItems.length === 0
-                    ? 'No items in this box.'
-                    : tagFilterId && !boxFilterId && tagFilteredItems.length === 0
-                      ? 'No items with this tag.'
-                      : 'No items found.'}
+                  {locationFilterId && !boxFilterId && !tagFilterId && locationFilteredItems.length === 0
+                    ? 'No items at this location.'
+                    : boxFilterId && !tagFilterId && boxFilteredItems.length === 0
+                      ? 'No items in this box.'
+                      : tagFilterId && !boxFilterId && tagFilteredItems.length === 0
+                        ? 'No items with this tag.'
+                        : 'No items found.'}
                 </TableCell>
               </TableRow>
             ) : (
@@ -797,6 +836,17 @@ const ItemListPage = () => {
           </TableBody>
         </Table>
       </TableContainer>
+
+      <PaginationBar
+        variant="bottom"
+        sx={{ mt: 1 }}
+        count={paginatedCount}
+        page={page}
+        onPageChange={handleChangePage}
+        rowsPerPage={rowsPerPage}
+        onRowsPerPageChange={handleChangeRowsPerPage}
+        rowsPerPageOptions={[5, 10, 25, 50, { label: 'All', value: -1 }]}
+      />
 
       {selectedItems.size > 0 && (
         <Box sx={{ display: 'flex', alignItems: 'center', mt: 2 }}>

@@ -26,7 +26,8 @@ import {
   Add as AddIcon,
   Edit as EditIcon,
   Delete as DeleteIcon,
-  Storage as StorageIcon,
+  Inventory2 as Inventory2Icon,
+  FormatListBulleted as FormatListBulletedIcon,
 } from '@mui/icons-material';
 import { api } from '../services/api';
 import { useDatabases } from '../context/DatabaseContext';
@@ -113,6 +114,10 @@ const LocationListPage = () => {
 
   const handleViewBoxes = (id) => {
     navigate(`/boxes?locationId=${id}`);
+  };
+
+  const handleViewItems = (id) => {
+    navigate(`/items?locationId=${id}`);
   };
 
   const handleDeleteClick = (loc) => {
@@ -260,6 +265,7 @@ const LocationListPage = () => {
 
   const handleChangePage = (event, newPage) => {
     setPage(newPage);
+    window.scrollTo({ top: 0 }); // land at the top of the table after paging
   };
 
   // Total column count for colSpan: fixed columns + boxes + direct items + actions
@@ -359,7 +365,12 @@ const LocationListPage = () => {
                   <TableCell align="right">
                     <Tooltip title="View Boxes">
                       <IconButton onClick={() => handleViewBoxes(loc._id)} size="small">
-                        <StorageIcon />
+                        <Inventory2Icon />
+                      </IconButton>
+                    </Tooltip>
+                    <Tooltip title="View Items">
+                      <IconButton onClick={() => handleViewItems(loc._id)} size="small">
+                        <FormatListBulletedIcon />
                       </IconButton>
                     </Tooltip>
                     <Tooltip title="Edit Location">
@@ -379,6 +390,17 @@ const LocationListPage = () => {
           </TableBody>
         </Table>
       </TableContainer>
+
+      <PaginationBar
+        variant="bottom"
+        sx={{ mt: 1 }}
+        count={sortedLocations.length}
+        page={page}
+        onPageChange={handleChangePage}
+        rowsPerPage={rowsPerPage}
+        onRowsPerPageChange={handleChangeRowsPerPage}
+        rowsPerPageOptions={[5, 10, 25, 50, { label: 'All', value: -1 }]}
+      />
 
       {/* Delete Confirmation Dialog */}
       <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)}>

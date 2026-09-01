@@ -3,6 +3,12 @@ import { setActiveDatabaseId } from '../services/api';
 
 const STORAGE_KEY = 'junk-tracker-active-database';
 
+// Seed the API header at module load (before any render or effect runs) so a
+// page's first-mount fetches already carry the persisted database id. Without
+// this, child effects fire before the provider's sync effect below and the
+// initial requests would go out with no X-Database-Id header.
+setActiveDatabaseId(localStorage.getItem(STORAGE_KEY));
+
 // Context for the active logical database. The selection is persisted in
 // localStorage; every data request carries it via the X-Database-Id header
 // (see services/api.js). Pages refetch their data when activeDatabase changes.

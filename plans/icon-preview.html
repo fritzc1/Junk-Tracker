@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Icon Preview — View Boxes vs View Items</title>
+<style>
+  :root {
+    --primary: #1976d2;      /* MUI default primary */
+    --secondary: #9c27b0;    /* MUI default secondary */
+    --bg: #f5f6fa;
+    --card: #ffffff;
+    --text: #212121;
+    --muted: #616161;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "Roboto", "Segoe UI", Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 32px;
+  }
+  h1 { font-size: 26px; font-weight: 500; margin: 0 0 4px; }
+  .subtitle { color: var(--muted); margin-bottom: 28px; font-size: 14px; line-height: 1.5; max-width: 760px; }
+  h2 {
+    font-size: 17px; font-weight: 500; margin: 36px 0 12px;
+    padding-bottom: 8px; border-bottom: 2px solid #e0e0e0;
+  }
+  .grid { display: flex; flex-wrap: wrap; gap: 16px; }
+  .card {
+    background: var(--card);
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.12), 0 1px 2px rgba(0,0,0,.24);
+    padding: 20px;
+    width: 260px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+  }
+  .card.wide { width: 536px; max-width: 100%; }
+  .pair-row { display: flex; gap: 24px; justify-content: center; margin: 10px 0 4px; flex-wrap: wrap; }
+  .icon-cell { text-align: center; min-width: 130px; }
+  .icon-cell svg { display: block; margin: 0 auto 6px; }
+  .icon-name { font-size: 13px; font-weight: 500; }
+  .icon-role { font-size: 12px; color: var(--muted); }
+  .badge {
+    display: inline-block;
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    margin-bottom: 6px;
+    letter-spacing: .3px;
+  }
+  .badge.current { background: #eceff1; color: #455a64; }
+  .badge.recommended { background: #e8f5e9; color: #2e7d32; }
+  .badge.alt { background: #fff3e0; color: #ef6c00; }
+  /* Simulated table action buttons, exactly as they appear in the app */
+  .table-sim {
+    margin-top: 14px;
+    border: 1px solid #e0e0e0;
+    border-radius: 6px;
+    padding: 12px 16px;
+    width: 100%;
+    background: #fafafa;
+  }
+  .table-sim-label { font-size: 11px; color: var(--muted); margin-bottom: 8px; text-transform: uppercase; letter-spacing: .5px; }
+  .action-btns { display: flex; gap: 4px; justify-content: center; }
+  .iconbtn {
+    width: 34px; height: 34px;
+    border-radius: 50%;
+    display: inline-flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    transition: background .15s;
+  }
+  .iconbtn:hover { background: rgba(25,118,210,.08); }
+  .iconbtn svg { width: 20px; height: 20px; fill: var(--primary); }
+  .note { font-size: 12.5px; color: var(--muted); margin-top: 6px; text-align: center; max-width: 480px; line-height: 1.5; }
+</style>
+</head>
+<body>
+
+<h1>Icon Preview — “View Boxes” vs “View Items”</h1>
+<div class="subtitle">
+  Rendered with the exact SVG paths from your installed <code>@mui/icons-material@9.3.1</code>.
+  Open this file directly in a browser (double-click it) to compare, then pick a pairing for the plan.
+</div>
+
+<!-- ============ CURRENT STATE ============ -->
+<h2>Current state (what’s in the app today)</h2>
+<div class="grid">
+  <div class="card wide">
+    <span class="badge current">CURRENT</span>
+    <div class="pair-row">
+      <div class="icon-cell">
+        <!-- Storage -->
+        <svg width="48" height="48" viewBox="0 0 24 24"><path fill="#1976d2" d="M2 20h20v-4H2zm2-3h2v2H4zM2 4v4h20V4zm4 3H4V5h2zm-4 7h20v-4H2zm2-3h2v2H4z"/></svg>
+        <div class="icon-name">Storage</div>
+        <div class="icon-role">View Boxes (Locations page)</div>
+      </div>
+      <div class="icon-cell">
+        <!-- List -->
+        <svg width="48" height="48" viewBox="0 0 24 24"><path fill="#9c27b0" d="M3 13h2v-2H3zm0 4h2v-2H3zm0-8h2V7H3zm4 4h14v-2H7zm0 4h14v-2H7zM7 7v2h14V7z"/></svg>
+        <div class="icon-name">List</div>
+        <div class="icon-role">View Items (Boxes & Tags pages)</div>
+      </div>
+    </div>
+    <div class="table-sim">
+      <div class="table-sim-label">Simulated Locations table — Actions column</div>
+      <div class="action-btns">
+        <span class="iconbtn" title="View Boxes"><svg viewBox="0 0 24 24"><path d="M2 20h20v-4H2zm2-3h2v2H4zM2 4v4h20V4zm4 3H4V5h2zm-4 7h20v-4H2zm2-3h2v2H4z"/></svg></span>
+        <span class="iconbtn" title="View Items (new)"><svg viewBox="0 0 24 24"><path d="M3 13h2v-2H3zm0 4h2v-2H3zm0-8h2V7H3zm4 4h14v-2H7zm0 4h14v-2H7zM7 7v2h14V7z"/></svg></span>
+      </div>
+    </div>
+    <div class="note">Storage reads as “server rack / stacked drawers” — not obviously a box. List is generic lines.</div>
+  </div>
+</div>
+
+<!-- ============ OPTION A (RECOMMENDED) ============ -->
+<h2>Option A — Recommended: Inventory2 + FormatListBulleted</h2>
+<div class="grid">
+  <div class="card wide">
+    <span class="badge recommended">RECOMMENDED</span>
+    <div class="pair-row">
+      <div class="icon-cell">
+        <!-- Inventory2 -->
+        <svg width="48" height="48" viewBox="0 0 24 24"><path fill="#1976d2" d="M20 2H4c-1 0-2 .9-2 2v3.01c0 .72.43 1.34 1 1.69V20c0 1.1 1.1 2 2 2h14c.9 0 2-.9 2-2V8.7c.57-.35 1-.97 1-1.69V4c0-1.1-1-2-2-2m-5 12H9v-2h6zm5-7H4V4h16z"/></svg>
+        <div class="icon-name">Inventory2</div>
+        <div class="icon-role">View Boxes — open crate with a label slot</div>
+      </div>
+      <div class="icon-cell">
+        <!-- FormatListBulleted -->
+        <svg width="48" height="48" viewBox="0 0 24 24"><path fill="#9c27b0" d="M4 10.5c-.83 0-1.5.67-1.5 1.5s.67 1.5 1.5 1.5 1.5-.67 1.5-1.5-.67-1.5-1.5-1.5m0-6c-.83 0-1.5.67-1.5 1.5S3.17 7.5 4 7.5 5.5 6.83 5.5 6 4.83 4.5 4 4.5m0 12c-.83 0-1.5.68-1.5 1.5s.68 1.5 1.5 1.5 1.5-.68 1.5-1.5-.67-1.5-1.5-1.5M7 19h14v-2H7zm0-6h14v-2H7zm0-8v2h14V5z"/></svg>
+        <div class="icon-name">FormatListBulleted</div>
+        <div class="icon-role">View Items — bullets + lines, clearly a list of things</div>
+      </div>
+    </div>
+    <div class="table-sim">
+      <div class="table-sim-label">Simulated Locations table — Actions column</div>
+      <div class="action-btns">
+        <span class="iconbtn" title="View Boxes"><svg viewBox="0 0 24 24"><path d="M20 2H4c-1 0-2 .9-2 2v3.01c0 .72.43 1.34 1 1.69V20c0 1.1 1.1 2 2 2h14c.9 0 2-.9 2-2V8.7c.57-.35 1-.97 1-1.69V4c0-1.1-1-2-2-2m-5 12H9v-2h6zm5-7H4V4h16z"/></svg></span>
+        <span class="iconbtn" title="View Items (new)"><svg viewBox="0 0 24 24"><path d="M4 10.5c-.83 0-1.5.67-1.5 1.5s.67 1.5 1.5 1.5 1.5-.67 1.5-1.5-.67-1.5-1.5-1.5m0-6c-.83 0-1.5.67-1.5 1.5S3.17 7.5 4 7.5 5.5 6.83 5.5 6 4.83 4.5 4 4.5m0 12c-.83 0-1.5.68-1.5 1.5s.68 1.5 1.5 1.5 1.5-.68 1.5-1.5-.67-1.5-1.5-1.5M7 19h14v-2H7zm0-6h14v-2H7zm0-8v2h14V5z"/></svg></span>
+      </div>
+    </div>
+    <div class="note">Best semantic fit: a crate reads as “box”, bullets read as “items”. Also distinct from the plain List used elsewhere.</div>
+  </div>
+</div>
+
+<!-- ============ OPTION B (ALTERNATIVE) ============ -->
+<h2>Option B — Alternative: Archive + ViewList</h2>
+<div class="grid">
+  <div class="card wide">
+    <span class="badge alt">ALTERNATIVE</span>
+    <div class="pair-row">
+      <div class="icon-cell">
+        <!-- Archive -->
+        <svg width="48" height="48" viewBox="0 0 24 24"><path fill="#1976d2" d="m20.54 5.23-1.39-1.68C18.88 3.21 18.47 3 18 3H6c-.47 0-.88.21-1.16.55L3.46 5.23C3.17 5.57 3 6.02 3 6.5V19c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V6.5c0-.48-.17-.93-.46-1.27M12 17.5 6.5 12H10v-2h4v2h3.5zM5.12 5l.81-1h12l.94 1z"/></svg>
+        <div class="icon-name">Archive</div>
+        <div class="icon-role">View Boxes — closed box with a lid and handle slot</div>
+      </div>
+      <div class="icon-cell">
+        <!-- ViewList -->
+        <svg width="48" height="48" viewBox="0 0 24 24"><path fill="#9c27b0" d="M3 14h4v-4H3zm0 5h4v-4H3zM3 9h4V5H3zm5 5h13v-4H8zm0 5h13v-4H8zM8 5v4h13V5z"/></svg>
+        <div class="icon-name">ViewList</div>
+        <div class="icon-role">View Items — square bullets + rows, “list view” look</div>
+      </div>
+    </div>
+    <div class="table-sim">
+      <div class="table-sim-label">Simulated Locations table — Actions column</div>
+      <div class="action-btns">
+        <span class="iconbtn" title="View Boxes"><svg viewBox="0 0 24 24"><path d="m20.54 5.23-1.39-1.68C18.88 3.21 18.47 3 18 3H6c-.47 0-.88.21-1.16.55L3.46 5.23C3.17 5.57 3 6.02 3 6.5V19c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V6.5c0-.48-.17-.93-.46-1.27M12 17.5 6.5 12H10v-2h4v2h3.5zM5.12 5l.81-1h12l.94 1z"/></svg></span>
+        <span class="iconbtn" title="View Items (new)"><svg viewBox="0 0 24 24"><path d="M3 14h4v-4H3zm0 5h4v-4H3zM3 9h4V5H3zm5 5h13v-4H8zm0 5h13v-4H8zM8 5v4h13V5z"/></svg></span>
+      </div>
+    </div>
+    <div class="note">Archive is the most “box-like” of all candidates (closed lid). ViewList’s square bullets are a bit heavier than FormatListBulleted.</div>
+  </div>
+</div>
+
+<!-- ============ INDIVIDUAL CANDIDATES ============ -->
+<h2>All individual candidates (for reference)</h2>
+<div class="grid">
+  <div class="card" style="width:150px">
+    <!-- Storage -->
+    <svg width="40" height="40" viewBox="0 0 24 24"><path fill="#1976d2" d="M2 20h20v-4H2zm2-3h2v2H4zM2 4v4h20V4zm4 3H4V5h2zm-4 7h20v-4H2zm2-3h2v2H4z"/></svg>
+    <div class="icon-name">Storage</div>
+    <div class="icon-role">current (boxes)</div>
+  </div>
+  <div class="card" style="width:150px">
+    <!-- List -->
+    <svg width="40" height="40" viewBox="0 0 24 24"><path fill="#9c27b0" d="M3 13h2v-2H3zm0 4h2v-2H3zm0-8h2V7H3zm4 4h14v-2H7zm0 4h14v-2H7zM7 7v2h14V7z"/></svg>
+    <div class="icon-name">List</div>
+    <div class="icon-role">current (items)</div>
+  </div>
+  <div class="card" style="width:150px">
+    <!-- Inventory2 -->
+    <svg width="40" height="40" viewBox="0 0 24 24"><path fill="#1976d2" d="M20 2H4c-1 0-2 .9-2 2v3.01c0 .72.43 1.34 1 1.69V20c0 1.1 1.1 2 2 2h14c.9 0 2-.9 2-2V8.7c.57-.35 1-.97 1-1.69V4c0-1.1-1-2-2-2m-5 12H9v-2h6zm5-7H4V4h16z"/></svg>
+    <div class="icon-name">Inventory2</div>
+    <div class="icon-role">open crate (boxes)</div>
+  </div>
+  <div class="card" style="width:150px">
+    <!-- Archive -->
+    <svg width="40" height="40" viewBox="0 0 24 24"><path fill="#1976d2" d="m20.54 5.23-1.39-1.68C18.88 3.21 18.47 3 18 3H6c-.47 0-.88.21-1.16.55L3.46 5.23C3.17 5.57 3 6.02 3 6.5V19c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V6.5c0-.48-.17-.93-.46-1.27M12 17.5 6.5 12H10v-2h4v2h3.5zM5.12 5l.81-1h12l.94 1z"/></svg>
+    <div class="icon-name">Archive</div>
+    <div class="icon-role">closed box (boxes)</div>
+  </div>
+  <div class="card" style="width:150px">
+    <!-- Category -->
+    <svg width="40" height="40" viewBox="0 0 24 24"><path fill="#1976d2" d="m12 2-5.5 9h11z"/><circle cx="17.5" cy="17.5" r="4.5" fill="#1976d2"/><path fill="#1976d2" d="M3 13.5h8v8H3z"/></svg>
+    <div class="icon-name">Category</div>
+    <div class="icon-role">shapes (weak fit)</div>
+  </div>
+  <div class="card" style="width:150px">
+    <!-- FormatListBulleted -->
+    <svg width="40" height="40" viewBox="0 0 24 24"><path fill="#9c27b0" d="M4 10.5c-.83 0-1.5.67-1.5 1.5s.67 1.5 1.5 1.5 1.5-.67 1.5-1.5-.67-1.5-1.5-1.5m0-6c-.83 0-1.5.67-1.5 1.5S3.17 7.5 4 7.5 5.5 6.83 5.5 6 4.83 4.5 4 4.5m0 12c-.83 0-1.5.68-1.5 1.5s.68 1.5 1.5 1.5 1.5-.68 1.5-1.5-.67-1.5-1.5-1.5M7 19h14v-2H7zm0-6h14v-2H7zm0-8v2h14V5z"/></svg>
+    <div class="icon-name">FormatListBulleted</div>
+    <div class="icon-role">bullets (items)</div>
+  </div>
+  <div class="card" style="width:150px">
+    <!-- ViewList -->
+    <svg width="40" height="40" viewBox="0 0 24 24"><path fill="#9c27b0" d="M3 14h4v-4H3zm0 5h4v-4H3zM3 9h4V5H3zm5 5h13v-4H8zm0 5h13v-4H8zM8 5v4h13V5z"/></svg>
+    <div class="icon-name">ViewList</div>
+    <div class="icon-role">square bullets (items)</div>
+  </div>
+  <div class="card" style="width:150px">
+    <!-- Checklist -->
+    <svg width="40" height="40" viewBox="0 0 24 24"><path fill="#9c27b0" d="M22 7h-9v2h9zm0 8h-9v2h9zM5.54 11 2 7.46l1.41-1.41 2.12 2.12 4.24-4.24 1.41 1.41zm0 8L2 15.46l1.41-1.41 2.12 2.12 4.24-4.24 1.41 1.41z"/></svg>
+    <div class="icon-name">Checklist</div>
+    <div class="icon-role">checkmarks (items)</div>
+  </div>
+  <div class="card" style="width:150px">
+    <!-- LocalShipping -->
+    <svg width="40" height="40" viewBox="0 0 24 24"><path fill="#1976d2" d="M20 8h-3V4H3c-1.1 0-2 .9-2 2v11h2c0 1.66 1.34 3 3 3s3-1.34 3-3h6c0 1.66 1.34 3 3 3s3-1.34 3-3h2v-5zM6 18.5c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5m13.5-9 1.96 2.5H17V9.5zm-1.5 9c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5"/></svg>
+    <div class="icon-name">LocalShipping</div>
+    <div class="icon-role">truck (weak fit)</div>
+  </div>
+</div>
+
+<div class="note" style="margin-top:28px; max-width:none;">
+  Tip: hover the simulated action buttons to see their tooltips, exactly as they’ll appear in the Locations table.
+</div>
+
+</body>
+</html>

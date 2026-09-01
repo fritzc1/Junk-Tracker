@@ -1,13 +1,22 @@
 import React, { useState } from 'react';
-import { Box, Pagination, TablePagination, TextField, Typography } from '@mui/material';
+import { Box, Button, IconButton, Pagination, TablePagination, TextField, Typography } from '@mui/material';
+import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
+import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
+import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 
 /**
- * Shared pagination bar rendered above each list page's table.
+ * Shared pagination bar for list pages.
  *
- * Combines the standard MUI TablePagination (rows-per-page select, count label,
- * prev/next arrows) with numbered page buttons and a "Go to" input field.
- * The numbered buttons and goto input are hidden when there is only one page
- * or when all rows are shown at once ("All").
+ * variant="top" (default): rendered above the table. Combines the standard MUI
+ * TablePagination (rows-per-page select, count label — its built-in prev/next
+ * arrows are suppressed in favor of the numbered buttons) with numbered page
+ * buttons and a "Go to" input field. The numbered buttons and goto input are
+ * hidden when there is only one page or when all rows are shown at once ("All").
+ *
+ * variant="bottom": rendered below the table for quick navigation after
+ * scrolling through a page. Shows compact Prev/Next buttons with a "Page X of Y"
+ * label (only when multiple pages exist) plus a back-to-top button. Hidden
+ * entirely when there are no rows.
  *
  * Props mirror the previous TablePagination usage on each list page:
  *   count, page (0-based), onPageChange(event, newPage), rowsPerPage,
@@ -21,6 +30,7 @@ const PaginationBar = ({
   rowsPerPage,
   onRowsPerPageChange,
   rowsPerPageOptions,
+  variant = 'top',
   sx,
 }) => {
   const [gotoValue, setGotoValue] = useState('');
@@ -42,6 +52,49 @@ const PaginationBar = ({
     setGotoValue(''); // keep the goto field in sync with any page change
   };
 
+  // Bottom variant: compact Prev/Next + "Page X of Y" for quick navigation after
+  // scrolling through a page, plus a back-to-top button. Hidden when there are
+  // no rows; Prev/Next and the label hide themselves on a single page / "All".
+  if (variant === 'bottom') {
+    return (
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, ...sx }}>
+        {showPageControls && (
+          <>
+            <IconButton
+              size="small"
+              aria-label="Previous page"
+              disabled={page <= 0}
+              onClick={() => onPageChange(null, Math.max(0, page - 1))}
+            >
+              <ChevronLeftIcon />
+            </IconButton>
+            <Typography variant="body2">
+              Page {Math.min(page + 1, totalPages)} of {totalPages}
+            </Typography>
+            <IconButton
+              size="small"
+              aria-label="Next page"
+              disabled={page >= totalPages - 1}
+              onClick={() => onPageChange(null, Math.min(totalPages - 1, page + 1))}
+            >
+              <ChevronRightIcon />
+            </IconButton>
+          </>
+        )}
+        {count > 0 && (
+          <Button
+            size="small"
+            startIcon={<ArrowUpwardIcon />}
+            onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+            sx={{ ml: showPageControls ? 'auto' : 0 }}
+          >
+            Back to top
+          </Button>
+        )}
+      </Box>
+    );
+  }
+
   return (
     <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 2, ...sx }}>
       <TablePagination
@@ -52,6 +105,9 @@ const PaginationBar = ({
         rowsPerPage={rowsPerPage}
         onRowsPerPageChange={onRowsPerPageChange}
         rowsPerPageOptions={rowsPerPageOptions}
+        // Suppress the built-in prev/next arrows; navigation is handled by the
+        // numbered buttons here and the bottom pager below the table.
+        ActionsComponent={() => null}
       />
       {showPageControls && (
         <>
