@@ -26,6 +26,7 @@ import {
   Add as AddIcon,
   Edit as EditIcon,
   Delete as DeleteIcon,
+  List as ListIcon,
 } from '@mui/icons-material';
 import { api } from '../services/api';
 import PaginationBar from '../components/PaginationBar';
@@ -106,6 +107,12 @@ const TagListPage = () => {
     setDeleteDialogOpen(true);
   };
 
+  // Navigate to the Items page filtered by this tag (?tagId=...), mirroring
+  // the "View Items" pattern on the Boxes page.
+  const handleViewItems = (tag) => {
+    navigate(`/items?tagId=${tag._id}`);
+  };
+
   const handleDeleteConfirm = async () => {
     try {
       await api.deleteTag(tagToDelete._id);
@@ -180,9 +187,22 @@ const TagListPage = () => {
             ) : (
               paginatedTags.map(tag => (
                 <TableRow key={tag._id}>
-                  <TableCell>{tag.name}</TableCell>
+                  <TableCell>
+                    <Typography
+                      component="span"
+                      sx={{ color: 'primary.main', cursor: 'pointer' }}
+                      onClick={() => handleViewItems(tag)}
+                    >
+                      {tag.name}
+                    </Typography>
+                  </TableCell>
                   <TableCell align="right">{tag.itemCount || 0}</TableCell>
                   <TableCell align="right">
+                    <Tooltip title="View Items">
+                      <IconButton onClick={() => handleViewItems(tag)} size="small">
+                        <ListIcon />
+                      </IconButton>
+                    </Tooltip>
                     <Tooltip title="Edit Tag">
                       <IconButton onClick={() => handleOpenEdit(tag)} size="small">
                         <EditIcon />

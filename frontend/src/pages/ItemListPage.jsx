@@ -107,6 +107,7 @@ const ItemListPage = () => {
   const [items, setItems] = useState([]);
   const [boxes, setBoxes] = useState([]);
   const [locations, setLocations] = useState([]);
+  const [tags, setTags] = useState([]);
 
   // Search state
   const [searchMode, setSearchMode] = useState('basic'); // 'basic' | 'advanced'
@@ -153,16 +154,26 @@ const ItemListPage = () => {
     setSearchParams(next);
   };
 
+  // Active tag filter from URL (?tagId=...) — set by "View Items" on the Tags page.
+  const tagFilterId = searchParams.get('tagId');
+
+  const clearTagFilter = () => {
+    const next = new URLSearchParams(searchParams);
+    next.delete('tagId');
+    setSearchParams(next);
+  };
+
   useEffect(() => {
     fetchBoxes();
     fetchItems();
     fetchLocations();
+    fetchTags();
   }, []);
 
-  // Reset pagination whenever the box filter changes or is cleared
+  // Reset pagination whenever the box or tag filter changes or is cleared
   useEffect(() => {
     setPage(0);
-  }, [boxFilterId]);
+  }, [boxFilterId, tagFilterId]);
 
   const fetchBoxes = async () => {
     try {
@@ -179,6 +190,15 @@ const ItemListPage = () => {
       if (response.success) setLocations(response.data);
     } catch (err) {
       console.error('Error fetching locations:', err);
+    }
+  };
+
+  const fetchTags = async () => {
+    try {
+      const response = await api.getTags();
+      if (response.success) setTags(response.data);
+    } catch (err) {
+      console.error('Error fetching tags:', err);
     }
   };
 
@@ -326,7 +346,22 @@ const ItemListPage = () => {
     return match?.boxId || 'Unknown box';
   }, [boxes, boxFilterId]);
 
-  const filteredItems = boxFilteredItems.filter(applySearchFilter);
+  // Pre-filter by active tag from URL (?tagId=...) before search/sort/pagination.
+  // Items without the tag are excluded when the filter is active.
+  const matchesTagFilter = (item) => {
+    return (item.tags || []).some(t => String(t._id ?? t) === String(tagFilterId));
+  };
+
+  const tagFilteredItems = tagFilterId ? boxFilteredItems.filter(matchesTagFilter) : boxFilteredItems;
+
+  // Label for the active tag filter chip (resolved from the tags list)
+  const tagFilterLabel = useMemo(() => {
+    if (!tagFilterId) return '';
+    const match = tags.find(t => String(t._id) === String(tagFilterId));
+    return match?.name || 'Unknown tag';
+  }, [tags, tagFilterId]);
+
+  const filteredItems = tagFilteredItems.filter(applySearchFilter);
 
   // ---- Bulk Edit Logic ----
   const selectedItemsList = items.filter(item => selectedItems.has(item._id));
@@ -598,9 +633,14 @@ const ItemListPage = () => {
         clearAll={clearSearchCriteria}
       />
 
-      {boxFilterId && (
-        <Box sx={{ mb: 2 }}>
-          <Chip label={`Box: ${boxFilterLabel}`} color="primary" onDelete={clearBoxFilter} />
+      {(boxFilterId || tagFilterId) && (
+        <Box sx={{ mb: 2, display: 'flex', gap: 1 }}>
+          {boxFilterId && (
+            <Chip label={`Box: ${boxFilterLabel}`} color="primary" onDelete={clearBoxFilter} />
+          )}
+          {tagFilterId && (
+            <Chip label={`Tag: ${tagFilterLabel}`} color="secondary" onDelete={clearTagFilter} />
+          )}
         </Box>
       )}
 
@@ -670,9 +710,11 @@ const ItemListPage = () => {
             ) : sortedItems.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={totalColumns} align="center">
-                  {boxFilterId && boxFilteredItems.length === 0
+                  {boxFilterId && !tagFilterId && boxFilteredItems.length === 0
                     ? 'No items in this box.'
-                    : 'No items found.'}
+                    : tagFilterId && !boxFilterId && tagFilteredItems.length === 0
+                      ? 'No items with this tag.'
+                      : 'No items found.'}
                 </TableCell>
               </TableRow>
             ) : (
