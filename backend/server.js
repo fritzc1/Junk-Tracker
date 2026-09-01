@@ -115,16 +115,20 @@ async function ensureCaseInsensitiveBoxIndex() {
   );
 }
 
-// One-time migration for multi-database support. Creates the "Default"
-// database, backfills every existing data document with its ID (so pre-existing
-// data is preserved and visible), then swaps the old global-unique indexes to
-// per-database compound unique indexes so e.g. box "A06" can exist in multiple
-// databases. Idempotent: safe to run on every startup.
+// One-time migration for multi-database support. Creates a "Default" database
+// only when no databases exist yet (true first run), backfills every existing
+// data document with its ID (so pre-existing data is preserved and visible),
+// then swaps the old global-unique indexes to per-database compound unique
+// indexes so e.g. box "A06" can exist in multiple databases. Idempotent: safe
+// to run on every startup.
 async function migrateToMultiDatabase() {
   const Database = require('./models/Database');
 
-  // 1) Ensure a Default database exists (first run only).
-  let defaultDb = await Database.findOne({ name: 'Default' });
+  // 1) Ensure at least one database exists. Only create "Default" when there
+  // are NO databases at all (true first run); never add a stray "Default" to
+  // an instance that already has user-created databases. When databases do
+  // exist, the oldest is used as the backfill target for legacy documents.
+  let defaultDb = await Database.findOne().sort({ createdAt: 1 });
   if (!defaultDb) {
     defaultDb = await Database.create({ name: 'Default' });
     console.log('[Migration] Created "Default" database');
