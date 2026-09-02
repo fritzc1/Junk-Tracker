@@ -3,6 +3,10 @@ node_modules/
 
 # Build output
 dist/
+frontend/dist/
+
+# Release artifacts (staged package + distribution archives)
+release/
 
 # Environment & secrets
 .env

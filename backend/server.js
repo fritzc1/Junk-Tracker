@@ -1,3 +1,5 @@
+const path = require('path');
+const fs = require('fs');
 const express = require('express');
 const cors = require('cors');
 const mongoose = require('mongoose');
@@ -279,10 +281,38 @@ app.delete('/api/data/clear-all', requireDatabase, async (req, res) => {
   }
 });
 
-// Basic route
-app.get('/', (req, res) => {
-  res.json({ message: 'Junk Tracker API' });
-});
+// --- Production static file serving --------------------------------------
+// In production mode the backend serves the pre-built React frontend from
+// frontend/dist/ so the whole app runs as a single process. JUNK_TRACKER_ROOT
+// is set by the start scripts to the project root; it defaults to one level
+// above this directory (backend/..), which matches both dev checkouts and
+// release packages. In development, Vite serves the frontend on :3000 with an
+// /api proxy, so no static serving happens here.
+if (process.env.NODE_ENV === 'production') {
+  const appRoot = process.env.JUNK_TRACKER_ROOT || path.join(__dirname, '..');
+  const distDir = path.join(appRoot, 'frontend', 'dist');
+
+  if (!fs.existsSync(path.join(distDir, 'index.html'))) {
+    console.error(`[Startup] Production mode: frontend build not found at ${distDir}`);
+    console.error('[Startup] Build it first with scripts/build.cmd (or "npm run build" in frontend/).');
+    process.exit(1);
+  }
+
+  app.use(express.static(distDir));
+
+  // SPA fallback: any non-API GET request that did not match a static file
+  // returns index.html so client-side routing works on refresh/deep links.
+  app.get(/^(?!\/api).*/, (req, res) => {
+    res.sendFile(path.join(distDir, 'index.html'));
+  });
+
+  console.log(`[Startup] Serving production frontend from ${distDir}`);
+} else {
+  // Basic route (dev only — in production "/" serves the React app)
+  app.get('/', (req, res) => {
+    res.json({ message: 'Junk Tracker API' });
+  });
+}
 
 const PORT = process.env.PORT || 5000;
 

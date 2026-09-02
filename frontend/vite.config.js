@@ -9,7 +9,9 @@ export default defineConfig({
     port: 3000,
     proxy: {
       '/api': {
-        target: 'http://localhost:5000',
+        // Overridable via VITE_API_PROXY so the dev container can point at the
+        // backend service (http://backend-dev:5000); defaults to local dev.
+        target: process.env.VITE_API_PROXY || 'http://localhost:5000',
         changeOrigin: true,
       }
     }

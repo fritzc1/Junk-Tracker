@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * Release Manifest Generator for Cinema Control App
+ * Release Manifest Generator - Junk Tracker
  * Creates checksums and version information for all files in the release package.
  * Cross-platform: works on Windows, macOS, and Linux.
  */
@@ -47,7 +47,14 @@ function toForwardSlash(path) {
 }
 
 const cliVersion = process.argv[2];
-const releaseDirName = cliVersion ? `Cinema-Control-App-${cliVersion}` : 'Cinema-Control-App';
+
+if (!cliVersion || !/^\d+\.\d+\.\d+$/.test(cliVersion)) {
+    console.error('ERROR: A valid version number is required (e.g. 1.0.0)');
+    console.error(`Usage: node ${import.meta.url} x.x.x`);
+    process.exit(1);
+}
+
+const releaseDirName = `Junk-Tracker-${cliVersion}`;
 const releaseDir = join(rootDir, 'release', releaseDirName);
 
 if (!existsSync(releaseDir)) {
@@ -58,17 +65,8 @@ if (!existsSync(releaseDir)) {
 console.log('Generating release manifest...');
 console.log();
 
-// Extract version from client/package.json
-let version = cliVersion || 'unknown';
-const clientPackageJson = join(rootDir, 'client', 'package.json');
-if (existsSync(clientPackageJson)) {
-    try {
-        const pkg = JSON.parse(readFileSync(clientPackageJson, 'utf-8'));
-        version = pkg.version || version;
-    } catch (e) {
-        console.warn('WARNING: Could not parse client/package.json for version');
-    }
-}
+// Version comes from the CLI argument (the version being released).
+const version = cliVersion;
 
 // Generate timestamp
 const timestamp = new Date().toISOString();

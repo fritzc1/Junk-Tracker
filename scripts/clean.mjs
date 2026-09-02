@@ -7,18 +7,18 @@
  * Usage:
  *   node scripts/clean.mjs [targets...] [--all]
  *
- * Targets (positional; default = client-build release):
- *   client-build    Remove client/build/ (Vite output)
- *   release         Remove the entire release/ tree (package dir, _staging/, zips)
+ * Targets (positional; default = frontend-build + release):
+ *   frontend-build  Remove frontend/dist/ (Vite output)
+ *   release         Remove the entire release/ tree (package dir, archives)
  *   logs            Remove runtime log files/directories
- *   node-modules    Remove node_modules in root, client/, and server/
+ *   node-modules    Remove node_modules in root, backend/, and frontend/
  *
  * Flags:
  *   --all           Add node-modules to the target set
  *
  * SAFETY: This script uses an explicit allowlist of paths. Anything not listed
- * here is never touched — in particular MongoDB/ (contains user DB data), MPV/,
- * server/public/{uploads,settings-store,users}, and .env files.
+ * here is never touched — in particular MongoDB/ (contains user DB data) and
+ * .env files.
  */
 
 import { existsSync, readdirSync, rmSync } from 'node:fs';
@@ -40,7 +40,7 @@ if (unknownFlags.length > 0) {
     process.exit(1);
 }
 
-const VALID_TARGETS = ['client-build', 'release', 'logs', 'node-modules'];
+const VALID_TARGETS = ['frontend-build', 'release', 'logs', 'node-modules'];
 const invalidTargets = positional.filter(t => !VALID_TARGETS.includes(t));
 
 if (invalidTargets.length > 0) {
@@ -49,7 +49,7 @@ if (invalidTargets.length > 0) {
     process.exit(1);
 }
 
-let targets = positional.length > 0 ? [...positional] : ['client-build', 'release'];
+let targets = positional.length > 0 ? [...positional] : ['frontend-build', 'release'];
 if (allFlag && !targets.includes('node-modules')) {
     targets.push('node-modules');
 }
@@ -58,8 +58,8 @@ if (allFlag && !targets.includes('node-modules')) {
 // Explicit allowlist only. Paths are resolved relative to the repo root so the
 // script works regardless of the current working directory.
 
-const clientDir = join(rootDir, 'client');
-const serverDir = join(rootDir, 'server');
+const frontendDir = join(rootDir, 'frontend');
+const backendDir = join(rootDir, 'backend');
 
 function collectDebugLogFiles(dir) {
     if (!existsSync(dir)) return [];
@@ -74,24 +74,10 @@ function collectDebugLogFiles(dir) {
 
 function pathsFor(target) {
     switch (target) {
-        case 'client-build':
-            return [join(clientDir, 'build')];
+        case 'frontend-build':
+            return [join(frontendDir, 'dist')];
         case 'release':
             return [join(rootDir, 'release')];
-        case 'logs':
-            // Configured log location is <root>/logs/app.log (see server/config/production-config.js)
-            return [
-                join(rootDir, 'logs'),
-                ...collectDebugLogFiles(rootDir),
-                ...collectDebugLogFiles(clientDir),
-                ...collectDebugLogFiles(serverDir),
-            ];
-        case 'node-modules':
-            return [
-                join(rootDir, 'node_modules'),
-                join(clientDir, 'node_modules'),
-                join(serverDir, 'node_modules'),
-            ];
         default:
             return [];
     }
@@ -99,7 +85,7 @@ function pathsFor(target) {
 
 // --- Run -------------------------------------------------------------------
 
-console.log('Cinema Control App - Clean');
+console.log('Junk Tracker - Clean');
 console.log('==========================');
 console.log(`Targets: ${targets.join(', ')}`);
 console.log();
@@ -138,6 +124,6 @@ if (removedCount === 0) {
 } else {
     console.log(`Clean complete: ${removedCount} path(s) removed.`);
     if (targets.includes('node-modules')) {
-        console.log('Reinstall dependencies by running Install.cmd / Install.sh, or npm install in server/ and client/.');
+        console.log('Reinstall dependencies by running Install.cmd / Install.sh, or npm install in backend/ and frontend/.');
     }
 }

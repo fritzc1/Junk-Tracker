@@ -2,9 +2,11 @@ const mongoose = require('mongoose');
 
 const connectDB = async () => {
   try {
-    // For local development, we'll use a local MongoDB instance
-    // In production, you would use an environment variable for the connection string
-    const conn = await mongoose.connect('mongodb://127.0.0.1:27017/junktracker', {
+    // Connection string is configurable via MONGODB_URI so the same code works
+    // with a local mongod (default), Docker Compose (mongodb://mongodb:27017/...),
+    // or any external MongoDB deployment.
+    const uri = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/junktracker';
+    const conn = await mongoose.connect(uri, {
       useNewUrlParser: true,
       useUnifiedTopology: true,
     });

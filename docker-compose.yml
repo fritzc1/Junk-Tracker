@@ -1,4 +1,14 @@
-version: '3.8'
+# Junk Tracker — Docker Compose
+#
+# Production (single app container serving API + pre-built UI on :5000):
+#   docker compose --profile production up -d --build
+#
+# Development (hot-reload backend on :5000 + Vite dev server on :3000):
+#   docker compose --profile dev up -d
+#
+# MongoDB only (for running the app natively against a containerized DB):
+#   docker compose up -d mongodb
+
 services:
   mongodb:
     image: mongo:latest
@@ -9,27 +19,55 @@ services:
       - ./mongo-data:/data/db
     restart: unless-stopped
 
-  backend:
-    build: 
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: junktracker-backend
+  # --- Production profile -----------------------------------------------------
+  # One image, one process: Express API + the pre-built React frontend.
+  app:
+    profiles: ["production"]
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    image: junk-tracker:latest
+    container_name: junktracker-app
+    ports:
+      - "5000:5000"
+    environment:
+      - NODE_ENV=production
+      - MONGODB_URI=mongodb://mongodb:27017/junktracker
+    depends_on:
+      - mongodb
+    restart: unless-stopped
+
+  # --- Dev profile --------------------------------------------------------------
+  backend-dev:
+    profiles: ["dev"]
+    image: node:22-alpine
+    container_name: junktracker-backend-dev
+    working_dir: /app/backend
+    command: sh -c "npm install && npm run dev"
+    environment:
+      - NODE_ENV=development
+      - MONGODB_URI=mongodb://mongodb:27017/junktracker
+    volumes:
+      - ./backend:/app/backend
     ports:
       - "5000:5000"
     depends_on:
       - mongodb
-    environment:
-      - NODE_ENV=development
-      - MONGODB_URI=mongodb://mongodb:27017/junktracker
     restart: unless-stopped
 
-  frontend:
-    build: 
-      context: ./frontend
-      dockerfile: Dockerfile
-    container_name: junktracker-frontend
+  frontend-dev:
+    profiles: ["dev"]
+    image: node:22-alpine
+    container_name: junktracker-frontend-dev
+    working_dir: /app/frontend
+    command: sh -c "npm install --legacy-peer-deps && npm start"
+    environment:
+      # Vite proxy target inside the compose network (see vite.config.js).
+      - VITE_API_PROXY=http://backend-dev:5000
+    volumes:
+      - ./frontend:/app/frontend
     ports:
       - "3000:3000"
     depends_on:
-      - backend
+      - backend-dev
     restart: unless-stopped

@@ -9,6 +9,10 @@
 #
 ###############################################################################
 
+# Always run from the directory containing this script (repo root), so the
+# relative paths below work no matter where the user invokes it from.
+cd "$(dirname "$0")" || exit 1
+
 # Parse all arguments in any order
 PRODUCTION_MODE=false
 DEBUG_MODE=false
@@ -30,10 +34,16 @@ if [ ! -f "./frontend/package.json" ]; then
     PRODUCTION_MODE=true
 fi
 
-cd "./MongoDB"
+cd "./MongoDB" || exit 1
 echo "MongoDB Server directory:"
 pwd
-mongod.exe  &
+
+# Start mongod from the vendored ./MongoDB/bin/ install (created by Install.sh).
+if [ ! -x "./bin/mongod" ]; then
+    echo "[ERROR] MongoDB not found at ./MongoDB/bin/mongod — run ./Install.sh first."
+    exit 1
+fi
+./bin/mongod --dbpath "./data/db" &
 
 cd "../backend"
 echo "NodeJS Backend directory:"
@@ -75,5 +85,5 @@ else
     npm "start" &
 fi
 
-#: return us to starting dir
-cd ".."
+# (We cd'd into the script's own directory at the top, so there is no need to
+# walk back out — the background processes keep running from here.)

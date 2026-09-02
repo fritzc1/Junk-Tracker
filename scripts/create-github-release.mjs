@@ -58,9 +58,12 @@ function findAssets(archiveDir) {
   if (!fs.existsSync(archiveDir)) return assets;
 
   for (const entry of fs.readdirSync(archiveDir)) {
-    const ext = path.extname(entry).toLowerCase();
-    if (ext === '.zip' || ext === '.tar.gz') {
-      assets.push(path.join(archiveDir, entry));
+    // Only top-level distribution archives — skip the staged package directory.
+    if (fs.statSync(path.join(archiveDir, entry)).isFile()) {
+      const ext = path.extname(entry).toLowerCase();
+      if (ext === '.zip' || entry.endsWith('.tar.gz')) {
+        assets.push(path.join(archiveDir, entry));
+      }
     }
   }
   return assets;
@@ -119,9 +122,9 @@ function main() {
     }
   }
 
-  // Upload assets
-  const archiveDir = path.join(rootDir, 'dist', tag);
-  const assets = findAssets(archiveDir);
+  // Upload assets (created by scripts/create-release-archive.mjs in release/)
+  const archiveDir = path.join(rootDir, 'release');
+  const assets = findAssets(archiveDir).filter(a => a.includes(version));
 
   if (assets.length > 0) {
     console.log(`Uploading ${assets.length} asset(s)...`);
@@ -149,9 +152,9 @@ function getRemoteOrgRepo() {
     // git@github.com:owner/repo.git -> owner/repo
     // https://github.com/owner/repo.git -> owner/repo
     const match = output.match(/[:\/]([^/]+)\/([^.]+)/);
-    return match ? `${match[1]}/${match[2]}` : 'fritzc1/Cinema-Control-App';
+    return match ? `${match[1]}/${match[2]}` : 'unknown/repo';
   } catch {
-    return 'fritzc1/Cinema-Control-App';
+    return 'unknown/repo';
   }
 }
 

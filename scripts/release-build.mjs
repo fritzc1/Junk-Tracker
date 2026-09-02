@@ -1,13 +1,23 @@
 #!/usr/bin/env node
 
 /**
- * Release Build - Full Release Pipeline
- * Runs the complete release process: changelog, build, archive, and optional GitHub release.
+ * Release Build - Full Release Pipeline (Junk Tracker)
+ * Runs the complete release process: changelog, production build, staging,
+ * checksum manifest, archive creation, and optional GitHub release.
  * Cross-platform: works on Windows, macOS, and Linux.
+ *
+ * Usage:
+ *   scripts/release-build.cmd <version> [--publish]     # Windows
+ *   ./scripts/release-build.sh <version> [--publish]    # Mac/Linux
+ *   node scripts/release-build.mjs <version> [--publish]
+ *
+ * The release package is a single universal archive (no platform-specific
+ * binaries): app code + pre-built frontend + start/install scripts. MongoDB
+ * itself is downloaded by Install.* on the user's machine at install time.
  */
 
-import { execSync, spawn } from 'node:child_process';
-import { existsSync, mkdirSync, copyFileSync, rmSync, cpSync } from 'node:fs';
+import { execSync } from 'node:child_process';
+import { existsSync, mkdirSync, rmSync, cpSync, copyFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -23,21 +33,11 @@ function exec(cmd, opts = {}) {
     }
 }
 
-function isWindows() {
-    return process.platform === 'win32';
-}
-
-// Determine shell for running scripts
-const shell = isWindows() ? 'powershell.exe' : '/bin/bash';
-const shellFlag = isWindows() ? '-Command' : '';
-
 function runScript(scriptPath, ...args) {
-    if (isWindows()) {
-        exec(`node "${join(__dirname, scriptPath)}" ${args.join(' ')}`);
-    } else {
-        exec(`node "${join(__dirname, scriptPath)}" ${args.join(' ')}`);
-    }
+    exec(`node "${join(__dirname, scriptPath)}" ${args.join(' ')}`, { cwd: rootDir });
 }
+
+// --- Arguments ---------------------------------------------------------------
 
 const version = process.argv[2];
 const publishFlag = process.argv[3];
@@ -46,8 +46,8 @@ if (!version || !/^\d+\.\d+\.\d+$/.test(version)) {
     console.error('ERROR: A valid version number is required (e.g. 1.0.0)');
     console.error('');
     console.error('Usage:');
-    console.error('  release-build.cmd <version> [--publish]');
-    console.error('  node release-build.mjs <version> [--publish]');
+    console.error('  release-build.cmd <version> [--publish]      (Windows)');
+    console.error('  ./release-build.sh <version> [--publish]     (Mac/Linux)');
     console.error('');
     console.error('Examples:');
     console.error('  release-build.cmd 1.0.0');
@@ -55,15 +55,16 @@ if (!version || !/^\d+\.\d+\.\d+$/.test(version)) {
     process.exit(1);
 }
 
-console.log(`Cinema Control App - Release Build`);
-console.log(`====================================`);
+console.log('Junk Tracker - Release Build');
+console.log('====================================');
 console.log(`Version: ${version}`);
 console.log();
 
-// Validate required files before building
+// --- Validate required files ---------------------------------------------------
+
 const requiredFiles = [
-    { path: join(rootDir, 'client', 'package.json'), desc: 'client/package.json' },
-    { path: join(rootDir, 'server', 'package.json'), desc: 'server/package.json' },
+    { path: join(rootDir, 'backend', 'package.json'), desc: 'backend/package.json' },
+    { path: join(rootDir, 'frontend', 'package.json'), desc: 'frontend/package.json' },
 ];
 
 for (const { path, desc } of requiredFiles) {
@@ -73,120 +74,93 @@ for (const { path, desc } of requiredFiles) {
     }
 }
 
-// Step 1: Generate Changelog
-console.log('Step 1: Generating changelog...');
+// --- Step 1: Generate changelog --------------------------------------------------
+
+console.log('Step 1/5: Generating changelog...');
 runScript('generate-changelog.mjs', version);
 console.log();
 
-// Step 2: Build Client (npm run build in client/)
-console.log('Step 2: Building client...');
-const clientDir = join(rootDir, 'client');
-if (existsSync(join(clientDir, 'package.json'))) {
-    exec('npm run build', { cwd: clientDir });
-} else {
-    console.warn('WARNING: client/package.json not found, skipping client build');
+// --- Step 2: Production build (frontend -> frontend/dist) --------------------------
+
+console.log('Step 2/5: Building production frontend...');
+runScript('build.mjs');
+const distDir = join(rootDir, 'frontend', 'dist');
+if (!existsSync(join(distDir, 'index.html'))) {
+    console.error('ERROR: Frontend build did not produce frontend/dist/index.html');
+    process.exit(1);
 }
 console.log();
 
-// Step 3: Create release directory structure
-const releaseDir = join(rootDir, 'release', `Cinema-Control-App-${version}`);
+// --- Step 3: Stage the release package ----------------------------------------------
 
-// Clean previous release
 const releaseRoot = join(rootDir, 'release');
+const releaseDirName = `Junk-Tracker-${version}`;
+const releaseDir = join(releaseRoot, releaseDirName);
+
 if (existsSync(releaseRoot)) {
     console.log('Cleaning previous release...');
     rmSync(releaseRoot, { recursive: true, force: true });
 }
-
 mkdirSync(releaseDir, { recursive: true });
 
-// Copy server
-console.log('Copying server to release...');
-const srcServer = join(rootDir, 'server');
-const dstServer = join(releaseDir, 'server');
-cpSync(srcServer, dstServer, { recursive: true, force: true });
+// 3a) Backend source WITHOUT node_modules (Install.* reinstalls on the target).
+console.log('Copying backend to release (without node_modules)...');
+const srcBackend = join(rootDir, 'backend');
+const dstBackend = join(releaseDir, 'backend');
+cpSync(srcBackend, dstBackend, { recursive: true, force: true });
+rmSync(join(dstBackend, 'node_modules'), { recursive: true, force: true });
 
-// Remove server/node_modules from release (will be installed on target)
-const srvNodeModules = join(dstServer, 'node_modules');
-if (existsSync(srvNodeModules)) {
-    rmSync(srvNodeModules, { recursive: true, force: true });
-}
+// 3b) Pre-built frontend ONLY (no package.json — the start scripts use its
+// absence to auto-detect a pre-built release and skip the build step).
+console.log('Copying pre-built frontend (dist only)...');
+cpSync(distDir, join(releaseDir, 'frontend', 'dist'), { recursive: true, force: true });
 
-// Copy client build to release/.../client/build/ (server expects client/build/index.html)
-console.log('Copying client to release...');
-const clientBuild = join(rootDir, 'client', 'build');
-const dstClientBuild = join(releaseDir, 'client', 'build');
-if (!existsSync(clientBuild)) {
-    console.error('ERROR: client/build not found - client build failed or build directory is missing');
-    process.exit(1);
-}
-cpSync(clientBuild, dstClientBuild, { recursive: true, force: true });
-
-// Copy 7za if exists
-const srcSevenZip = join(rootDir, '7za');
-if (existsSync(srcSevenZip)) {
-    console.log('Copying 7za to release...');
-    cpSync(srcSevenZip, join(releaseDir, '7za'), { recursive: true, force: true });
-}
-
-// Copy mpv if exists (check common locations)
-const mpvDirs = [
-    join(rootDir, 'mpv'),
-    join(rootDir, 'mpv', 'windows-x86_64'),
+// 3c) Start / install scripts + docs.
+const rootFiles = [
+    'README.md',
+    'CHANGELOG.md',
+    'Start.cmd', 'Start.ps1', 'Start.sh',
+    'Install.cmd', 'Install.ps1', 'Install.sh',
 ];
-for (const mpvSrc of mpvDirs) {
-    if (existsSync(mpvSrc)) {
-        console.log(`Copying mpv from ${mpvSrc}...`);
-        cpSync(mpvSrc, join(releaseDir, 'mpv'), { recursive: true, force: true });
-        break;
-    }
-}
-
-// Copy config templates
-const configDir = join(rootDir, 'server', 'config');
-if (existsSync(configDir)) {
-    console.log('Copying config to release...');
-    cpSync(configDir, join(releaseDir, 'server', 'config'), { recursive: true, force: true });
-}
-
-// Copy root-level files
-for (const file of ['README.md', 'CHANGELOG.md', 'LICENSE', 'Install.sh', 'Install.ps1', 'Install.cmd', 'Start.sh', 'Start.ps1', 'Start.cmd']) {
+for (const file of rootFiles) {
     const src = join(rootDir, file);
     if (existsSync(src)) {
         copyFileSync(src, join(releaseDir, file));
+    } else {
+        console.warn(`WARNING: ${file} not found — skipping.`);
     }
 }
 
 console.log();
-console.log('Release directory structure created.');
+console.log('Release package staged.');
 console.log();
 
-// Step 5: Generate file checksum manifest
-console.log('Step 5: Generating file checksum manifest...');
+// --- Step 4: Checksum manifest -------------------------------------------------------
+
+console.log('Step 4/5: Generating file checksum manifest...');
 runScript('release-manifest.mjs', version);
 console.log();
 
-// Step 6: Create archives
-console.log('Step 6: Creating distribution archives...');
+// --- Step 5: Create distribution archive -----------------------------------------------
+
+console.log('Step 5/5: Creating distribution archive...');
 runScript('create-release-archive.mjs', version);
 console.log();
 
-// Step 7: Optional GitHub release
+// --- Optional: GitHub release -----------------------------------------------------------
+
 if (publishFlag === '--publish') {
-    console.log('Step 7: Publishing to GitHub...');
-    runScript('create-github-release.mjs', version);
+    console.log('Publishing to GitHub...');
+    runScript('create-github-release.mjs', `--version ${version}`);
     console.log();
 } else {
-    console.log(`Skipping GitHub release. Use --publish flag to publish.`);
+    console.log('Skipping GitHub release. Use --publish flag to publish.');
 }
 
-console.log(`====================================`);
+console.log('====================================');
 console.log(`Release build complete for v${version}!`);
 console.log();
-console.log('Release artifacts:');
-for (const platform of ['Windows', 'Mac', 'Linux']) {
-    const p = join(releaseRoot, `Cinema-Control-App-${platform}-${version}.zip`);
-    if (existsSync(p)) {
-        console.log(`  ${p}`);
-    }
+console.log('Artifacts in release/:');
+for (const entry of readdirSync(releaseRoot)) {
+    console.log(`  ${join(releaseRoot, entry)}`);
 }

@@ -1,0 +1,9 @@
+# Keep Docker build contexts lean (context = repo root, see docker-compose.yml)
+node_modules
+*/node_modules
+frontend/dist
+release/
+MongoDB/
+mongo-data/
+.git
+*.log
