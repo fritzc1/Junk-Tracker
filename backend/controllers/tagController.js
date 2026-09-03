@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 const Tag = require('../models/Tag');
 const Item = require('../models/Item');
+const Box = require('../models/Box');
 
 // @desc    Create a new tag
 // @route   POST /api/tags
@@ -27,7 +28,7 @@ const createTag = async (req, res) => {
   }
 };
 
-// @desc    Get all tags with item counts
+// @desc    Get all tags with item and box counts
 // @route   GET /api/tags
 // @access  Public
 const getTags = async (req, res) => {
@@ -44,10 +45,21 @@ const getTags = async (req, res) => {
         }
       },
       {
-        $addFields: { itemCount: { $size: '$taggedItems' } }
+        $lookup: {
+          from: 'boxes',
+          localField: '_id',
+          foreignField: 'tags',
+          as: 'taggedBoxes'
+        }
       },
       {
-        $project: { taggedItems: 0 }
+        $addFields: {
+          itemCount: { $size: '$taggedItems' },
+          boxCount: { $size: '$taggedBoxes' }
+        }
+      },
+      {
+        $project: { taggedItems: 0, taggedBoxes: 0 }
       },
       { $sort: { name: 1 } }
     ]);
@@ -69,7 +81,7 @@ const searchTags = async (req, res) => {
       return res.status(200).json({ success: true, data: [] });
     }
 
-    // Case-insensitive fuzzy search with item counts (scoped to the active database)
+    // Case-insensitive fuzzy search with item and box counts (scoped to the active database)
     const tags = await Tag.aggregate([
       { $match: { databaseId: new mongoose.Types.ObjectId(req.databaseId), name: { $regex: query.toLowerCase(), $options: 'i' } } },
       {
@@ -80,8 +92,21 @@ const searchTags = async (req, res) => {
           as: 'taggedItems'
         }
       },
-      { $addFields: { itemCount: { $size: '$taggedItems' } } },
-      { $project: { taggedItems: 0 } },
+      {
+        $lookup: {
+          from: 'boxes',
+          localField: '_id',
+          foreignField: 'tags',
+          as: 'taggedBoxes'
+        }
+      },
+      {
+        $addFields: {
+          itemCount: { $size: '$taggedItems' },
+          boxCount: { $size: '$taggedBoxes' }
+        }
+      },
+      { $project: { taggedItems: 0, taggedBoxes: 0 } },
       { $sort: { name: 1 } },
       { $limit: 20 }
     ]);
@@ -124,7 +149,7 @@ const updateTag = async (req, res) => {
   }
 };
 
-// @desc    Delete a tag and remove from all items
+// @desc    Delete a tag and remove from all items and boxes
 // @route   DELETE /api/tags/:id
 // @access  Public
 const deleteTag = async (req, res) => {
@@ -137,6 +162,12 @@ const deleteTag = async (req, res) => {
 
     // Remove this tag from all items in the active database
     await Item.updateMany(
+      { tags: req.params.id, databaseId },
+      { $pull: { tags: req.params.id } }
+    );
+
+    // Remove this tag from all boxes in the active database
+    await Box.updateMany(
       { tags: req.params.id, databaseId },
       { $pull: { tags: req.params.id } }
     );

@@ -11,7 +11,7 @@ import {
   Autocomplete,
   IconButton,
 } from '@mui/material';
-import { ArrowBack as ArrowBackIcon, Add as AddIcon } from '@mui/icons-material';
+import { ArrowBack as ArrowBackIcon, Add as AddIcon, Edit as EditIcon } from '@mui/icons-material';
 import { api } from '../services/api';
 import { useDatabases } from '../context/DatabaseContext';
 import TagSelector from './TagSelector';
@@ -25,6 +25,10 @@ const ItemEntryForm = ({ mode }) => {
 
   const [description, setDescription] = useState('');
   const [selectedBoxId, setSelectedBoxId] = useState('');
+  // Raw text currently typed into the Box field (tracked via onInputChange so
+  // the "+" quick-create button can pre-fill NewBoxDialog with it). Reset to ''
+  // whenever a box is actually selected or created.
+  const [boxQuery, setBoxQuery] = useState('');
   const [selectedLocationId, setSelectedLocationId] = useState('');
   const [boxes, setBoxes] = useState([]);
   const [locations, setLocations] = useState([]);
@@ -45,12 +49,26 @@ const ItemEntryForm = ({ mode }) => {
     }
     setSelectedBoxId(box._id);
     setSelectedLocationId('');
+    setBoxQuery('');
   };
 
   // A location was just created in the dialog: add it to options and select it.
   const handleNewLocationCreated = (location) => {
     setLocations(prev => [...prev, location]);
     setSelectedLocationId(location._id);
+  };
+
+  // An existing box was edited via the dialog's edit mode ("+" turned into an
+  // edit icon): replace it in the options list so its inherited-location label
+  // reflects the changes immediately. `newLocation` is non-null when the box's
+  // location was also created/edited in that session — upsert it too.
+  const handleBoxUpdated = (box, newLocation) => {
+    setBoxes(prev => prev.map(b => b._id === box._id ? box : b));
+    if (newLocation) {
+      setLocations(prev => prev.some(l => l._id === newLocation._id)
+        ? prev.map(l => l._id === newLocation._id ? newLocation : l)
+        : [...prev, newLocation]);
+    }
   };
 
   // Load options on mount and whenever the active database changes. In edit
@@ -105,6 +123,17 @@ const ItemEntryForm = ({ mode }) => {
     return loc.subLocation ? `${loc.name} — ${loc.subLocation}` : loc.name;
   };
 
+  // The box the "+" button should act on: a committed selection wins, otherwise
+  // an exact (case-insensitive — mirroring the backend's canonical-uppercase
+  // uniqueness) match against the typed text. When non-null, the button renders
+  // as an edit icon and opens that box in edit mode instead of creating one.
+  const getActiveBox = () => {
+    if (selectedBoxId) return boxes.find(b => b._id === selectedBoxId) || null;
+    const q = boxQuery.trim().toUpperCase();
+    if (!q) return null;
+    return boxes.find(b => b.boxId && String(b.boxId).trim().toUpperCase() === q) || null;
+  };
+
   const fetchItem = async () => {
     try {
       setLoading(true);
@@ -134,11 +163,13 @@ const ItemEntryForm = ({ mode }) => {
     }
   };
 
-  // XOR: selecting a box clears location, and vice versa
+  // XOR: selecting a box clears location, and vice versa. A committed selection
+  // also resets the typed query so "+" doesn't pre-fill stale text next time.
   const handleBoxChange = (newBoxId) => {
     setSelectedBoxId(newBoxId);
     if (newBoxId) {
       setSelectedLocationId('');
+      setBoxQuery('');
     }
   };
 
@@ -219,6 +250,16 @@ const ItemEntryForm = ({ mode }) => {
               <Autocomplete
                 options={boxes}
                 value={selectedBoxId ? boxes.find(b => b._id === selectedBoxId) || null : null}
+                // Track raw typed text (not just committed selections) so the "+"
+                // button can pre-fill NewBoxDialog with whatever was entered. Only
+                // real keystrokes update it: MUI fires programmatic resets on blur /
+                // selection ("reset", "blur") that would otherwise wipe the query
+                // mid-click and flip the edit icon back to "+". An explicit clear
+                // (X button) does reset it.
+                onInputChange={(e, newInputValue, reason) => {
+                  if (reason === 'input') setBoxQuery(newInputValue || '');
+                  else if (reason === 'clear') setBoxQuery('');
+                }}
                 onChange={(e, newValue) => handleBoxChange(newValue?._id || '')}
                 getOptionLabel={getBoxLabel}
                 isOptionEqualToValue={(option, val) => option._id === val._id}
@@ -228,37 +269,43 @@ const ItemEntryForm = ({ mode }) => {
                   return options.filter(box => getBoxLabel(box).toLowerCase().includes(query));
                 }}
                 noOptionsText="No matching boxes"
-                renderInput={(params) => (
-                  <TextField
-                    {...params}
-                    label="Box"
-                    placeholder="Type to search or select a box..."
-                    helperText="Selecting a box clears any direct location."
-                    slotProps={{
-                      ...params.slotProps,
-                      input: {
-                        ...params.slotProps?.input,
-                        endAdornment: (
-                          <>
-                            <IconButton
-                              size="small"
-                              aria-label="Add new box"
-                              title="Add new box"
-                              onClick={(e) => {
-                                // Don't let the click bubble to the Autocomplete root
-                                e.stopPropagation();
-                                setNewBoxOpen(true);
-                              }}
-                            >
-                              <AddIcon fontSize="small" />
-                            </IconButton>
-                            {params.slotProps?.input?.endAdornment}
-                          </>
-                        ),
-                      },
-                    }}
-                  />
-                )}
+                renderInput={(params) => {
+                  // If a box is selected or the typed text exactly matches one,
+                  // the button becomes an edit action for that box instead of "+".
+                  const match = getActiveBox();
+                  return (
+                    <TextField
+                      {...params}
+                      label="Box"
+                      placeholder="Type to search or select a box..."
+                      helperText={match ? 'This box exists — the button edits it.' : 'Selecting a box clears any direct location.'}
+                      slotProps={{
+                        ...params.slotProps,
+                        input: {
+                          ...params.slotProps?.input,
+                          endAdornment: (
+                            <>
+                              <IconButton
+                                size="small"
+                                color={match ? 'primary' : 'default'}
+                                aria-label={match ? `Edit box ${match.boxId}` : 'Add new box'}
+                                title={match ? `Edit existing box ${match.boxId}` : 'Add new box'}
+                                onClick={(e) => {
+                                  // Don't let the click bubble to the Autocomplete root
+                                  e.stopPropagation();
+                                  setNewBoxOpen(true);
+                                }}
+                              >
+                                {match ? <EditIcon fontSize="small" /> : <AddIcon fontSize="small" />}
+                              </IconButton>
+                              {params.slotProps?.input?.endAdornment}
+                            </>
+                          ),
+                        },
+                      }}
+                    />
+                  );
+                }}
               />
             </Box>
 
@@ -345,11 +392,16 @@ const ItemEntryForm = ({ mode }) => {
         </Paper>
       )}
 
-      {/* Quick-create dialogs — reuse the same entry forms as the full pages */}
+      {/* Quick-create dialogs — reuse the same entry forms as the full pages.
+          When a box is selected or the typed query matches one, the dialog opens
+          in edit mode for that box (the "+" button becomes an edit icon). */}
       <NewBoxDialog
         open={newBoxOpen}
         onClose={() => setNewBoxOpen(false)}
         onCreated={handleNewBoxCreated}
+        onUpdated={handleBoxUpdated}
+        initialBoxId={boxQuery}
+        editBoxId={getActiveBox()?._id || ''}
       />
       <NewLocationDialog
         open={newLocationOpen}

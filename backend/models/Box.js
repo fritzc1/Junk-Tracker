@@ -15,6 +15,12 @@ const boxSchema = new mongoose.Schema({
     default: null
   },
 
+  // Tags associated with this box
+  tags: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Tag'
+  }],
+
   // Human-readable box identifier (e.g., "A06", "FA03")
   boxId: {
     type: String,
@@ -51,6 +57,9 @@ boxSchema.index(
     partialFilterExpression: { $and: [{ boxId: { $type: 'string' } }, { boxId: { $gt: '' } }] }
   }
 );
+
+// Index to support tag-based lookups ($lookup from tags and filtering by tag)
+boxSchema.index({ tags: 1 });
 
 // Update the updatedAt field before saving
 boxSchema.pre('save', function (next) {

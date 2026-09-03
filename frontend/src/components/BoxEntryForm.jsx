@@ -8,10 +8,11 @@ import {
   Autocomplete,
   IconButton,
 } from '@mui/material';
-import { ArrowBack as ArrowBackIcon, Add as AddIcon } from '@mui/icons-material';
+import { ArrowBack as ArrowBackIcon, Add as AddIcon, Edit as EditIcon } from '@mui/icons-material';
 import { api } from '../services/api';
 import { useDatabases } from '../context/DatabaseContext';
 import LocationEntryForm from './LocationEntryForm';
+import TagSelector from './TagSelector';
 
 /**
  * Reusable box create/edit form.
@@ -26,18 +27,38 @@ import LocationEntryForm from './LocationEntryForm';
  * Props:
  *   mode             - 'create' | 'edit'
  *   id               - box id when mode === 'edit'
+ *   initialBoxId     - optional; pre-fills the Box ID field in create mode
+ *                      (e.g. text typed into a search autocomplete before
+ *                      opening this form via "+"). Ignored in edit mode, where
+ *                      fetchBox() overwrites it with the loaded box's ID.
  *   onSaved          - callback(box) invoked after a successful save
  *   allowNewLocation - show a "+" button next to the location select that
  *                      opens an inline LocationEntryForm step in place of
- *                      this form's content (no nested dialogs); saving
- *                      returns here with the new location preselected.
+ *                      this form's content (no nested dialogs). The step is
+ *                      create mode by default, pre-filled from typed text; if
+ *                      a location is selected or exactly matched it becomes an
+ *                      edit icon and the step edits that location instead.
+ *                      Saving returns here with the new/edited location
+ *                      preselected (and passed to onSaved as `newLocation`).
  *   onCancel         - optional; when provided, renders a Cancel button that calls it
  */
-const BoxEntryForm = ({ mode = 'create', id, onSaved, allowNewLocation = false, onCancel }) => {
+const BoxEntryForm = ({ mode = 'create', id, onSaved, allowNewLocation = false, onCancel, initialBoxId }) => {
   const { activeDatabaseId } = useDatabases();
-  const [boxIdValue, setBoxIdValue] = useState('');
+  // Pre-fill from initialBoxId (e.g. text typed into a search field before this
+  // form was opened via "+"). Uppercased to match the canonical box-ID form; in
+  // edit mode fetchBox() overwrites it with the loaded box's ID anyway.
+  const [boxIdValue, setBoxIdValue] = useState(
+    mode === 'create' ? (initialBoxId || '').toUpperCase() : ''
+  );
   const [selectedLocationId, setSelectedLocationId] = useState('');
+  // Raw text currently typed into the Location field (tracked via onInputChange
+  // so the "+" button can pre-fill / edit-match against it). Reset to '' when a
+  // location is actually selected or created.
+  const [locationQuery, setLocationQuery] = useState('');
   const [locations, setLocations] = useState([]);
+  // Tag names for this box (TagSelector works with lowercase name strings; the
+  // backend auto-creates any missing tags from tagNames on save).
+  const [tags, setTags] = useState([]);
   const [loading, setLoading] = useState(mode === 'edit');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
@@ -48,10 +69,15 @@ const BoxEntryForm = ({ mode = 'create', id, onSaved, allowNewLocation = false, 
   // an unchanged ID is never flagged as a duplicate of itself.
   const [ownBoxId, setOwnBoxId] = useState('');
 
-  // Internal "create location" step state (single dialog, no nesting)
+  // Internal "create/edit location" step state (single dialog, no nesting).
+  // The mode and target are captured when the step opens: "+" with a
+  // matching/selected location edits it; otherwise it creates one pre-filled
+  // from typed text.
   const [creatingLocation, setCreatingLocation] = useState(false);
-  // Location created during this session's internal step, if any — passed to
-  // onSaved so the parent can add it to its own options list.
+  const [locationStepMode, setLocationStepMode] = useState('create');
+  const [locationStepTargetId, setLocationStepTargetId] = useState('');
+  // Location created OR edited during this session's internal step, if any —
+  // passed to onSaved so the parent can upsert it into its own options list.
   const [createdLocation, setCreatedLocation] = useState(null);
 
   // Load options on mount and whenever the active database changes. In edit
@@ -103,6 +129,41 @@ const BoxEntryForm = ({ mode = 'create', id, onSaved, allowNewLocation = false, 
     return loc.subLocation ? `${loc.name} — ${loc.subLocation}` : loc.name;
   };
 
+  // The location the "+" button should act on: a committed selection wins,
+  // otherwise an exact case-insensitive match against the typed text (checked
+  // against both name and display label). When non-null, the button renders as
+  // an edit icon and opens that location in edit mode instead of creating one.
+  const getActiveLocation = () => {
+    if (selectedLocationId) return locations.find(l => l._id === selectedLocationId) || null;
+    const q = locationQuery.trim().toLowerCase();
+    if (!q) return null;
+    return locations.find(
+      l => l.name.toLowerCase() === q || getLocationLabel(l).toLowerCase() === q
+    ) || null;
+  };
+
+  // Pre-fill values for the create-location step, derived from the typed text:
+  // "Garage — Shelf 43" splits into name + subLocation (matching how locations
+  // are displayed); anything else goes into the name field.
+  const getLocationInitialValues = () => {
+    const q = locationQuery.trim();
+    if (!q) return undefined;
+    const sepIndex = q.indexOf(' — ');
+    if (sepIndex > 0) {
+      return { name: q.slice(0, sepIndex).trim(), subLocation: q.slice(sepIndex + 3).trim() };
+    }
+    return { name: q };
+  };
+
+  // Open the inline location step in create or edit mode depending on whether
+  // a location is selected / exactly matched by the typed text.
+  const handleOpenLocationStep = () => {
+    const match = getActiveLocation();
+    setLocationStepMode(match ? 'edit' : 'create');
+    setLocationStepTargetId(match?._id || '');
+    setCreatingLocation(true);
+  };
+
   const fetchBox = async () => {
     try {
       setLoading(true);
@@ -112,6 +173,10 @@ const BoxEntryForm = ({ mode = 'create', id, onSaved, allowNewLocation = false, 
         setOwnBoxId(response.data.boxId || '');
         if (response.data.locationId) {
           setSelectedLocationId(response.data.locationId._id || response.data.locationId);
+        }
+        // Set tags from populated data (getBoxById populates tags with names)
+        if (response.data.tags && Array.isArray(response.data.tags)) {
+          setTags(response.data.tags.map(t => t.name).filter(Boolean));
         }
       } else {
         setError('Failed to load box');
@@ -132,7 +197,8 @@ const BoxEntryForm = ({ mode = 'create', id, onSaved, allowNewLocation = false, 
     try {
       const payload = {
         boxId: boxIdValue,
-        locationId: selectedLocationId || null
+        locationId: selectedLocationId || null,
+        tagNames: tags
       };
 
       const response = mode === 'create'
@@ -155,9 +221,16 @@ const BoxEntryForm = ({ mode = 'create', id, onSaved, allowNewLocation = false, 
   // --- Internal location-creation step ---
 
   const handleNewLocationSaved = (location) => {
-    // Append to the local list and preselect it, then return to box fields.
-    setLocations(prev => [...prev, location]);
+    // Upsert into the local list and preselect it, then return to box fields.
+    // In edit mode the location already exists in the list — replace it so the
+    // renamed/relocated values show immediately. `createdLocation` carries the
+    // saved location (created OR edited) up to onSaved so parents can refresh
+    // their own options too.
+    setLocations(prev => prev.some(l => l._id === location._id)
+      ? prev.map(l => l._id === location._id ? location : l)
+      : [...prev, location]);
     setSelectedLocationId(location._id);
+    setLocationQuery('');
     setCreatedLocation(location);
     setCreatingLocation(false);
   };
@@ -188,8 +261,9 @@ const BoxEntryForm = ({ mode = 'create', id, onSaved, allowNewLocation = false, 
     return <Box sx={{ p: 2, textAlign: 'center' }}>Loading...</Box>;
   }
 
-  // Inline step: create a new location without leaving this form/dialog.
+  // Inline step: create or edit a location without leaving this form/dialog.
   if (creatingLocation) {
+    const isEdit = locationStepMode === 'edit';
     return (
       <div>
         <Button
@@ -200,10 +274,14 @@ const BoxEntryForm = ({ mode = 'create', id, onSaved, allowNewLocation = false, 
           Back to box details
         </Button>
         <Typography variant="subtitle2" gutterBottom>
-          New location for this box
+          {isEdit ? 'Edit location for this box' : 'New location for this box'}
         </Typography>
+        {/* key remounts the form per step so edit/create state never leaks over */}
         <LocationEntryForm
-          mode="create"
+          key={locationStepTargetId || 'new-location'}
+          mode={locationStepMode}
+          id={isEdit ? locationStepTargetId : undefined}
+          initialValues={isEdit ? undefined : getLocationInitialValues()}
           onSaved={handleNewLocationSaved}
           onCancel={() => setCreatingLocation(false)}
         />
@@ -272,11 +350,25 @@ const BoxEntryForm = ({ mode = 'create', id, onSaved, allowNewLocation = false, 
         )}
       />
 
-      {/* Location Selection — searchable, matching the item form's location field */}
+      {/* Location Selection — searchable, matching the item form's location field.
+          The "+" button pre-fills a new-location step with typed text; if the
+          text (or selection) exactly matches an existing location it becomes an
+          edit icon that opens that location in edit mode instead. */}
       <Autocomplete
         options={locations}
         value={selectedLocationId ? locations.find(l => l._id === selectedLocationId) || null : null}
-        onChange={(e, newValue) => setSelectedLocationId(newValue?._id || '')}
+        // Track raw typed text (not just committed selections) so the "+" button
+        // can pre-fill / edit-match against it. Only real keystrokes update it:
+        // MUI fires programmatic resets on blur / selection ("reset", "blur") that
+        // would otherwise wipe the query mid-click and flip the edit icon back to "+".
+        onInputChange={(e, newInputValue, reason) => {
+          if (reason === 'input') setLocationQuery(newInputValue || '');
+          else if (reason === 'clear') setLocationQuery('');
+        }}
+        onChange={(e, newValue) => {
+          setSelectedLocationId(newValue?._id || '');
+          if (newValue?._id) setLocationQuery('');
+        }}
         getOptionLabel={getLocationLabel}
         isOptionEqualToValue={(option, val) => option._id === val._id}
         filterOptions={(options, params) => {
@@ -285,36 +377,47 @@ const BoxEntryForm = ({ mode = 'create', id, onSaved, allowNewLocation = false, 
           return options.filter(loc => getLocationLabel(loc).toLowerCase().includes(query));
         }}
         noOptionsText="No matching locations"
-        renderInput={(params) => (
-          <TextField
-            {...params}
-            label="Location"
-            placeholder="Type to search or select a location..."
-            helperText="Optional — clear the field if the box has no fixed location."
-            slotProps={{
-              ...params.slotProps,
-              input: {
-                ...params.slotProps?.input,
-                endAdornment: (
-                  <>
-                    {allowNewLocation && (
-                      <IconButton
-                        size="small"
-                        aria-label="Add new location"
-                        title="Add new location"
-                        onClick={() => setCreatingLocation(true)}
-                      >
-                        <AddIcon fontSize="small" />
-                      </IconButton>
-                    )}
-                    {params.slotProps?.input?.endAdornment}
-                  </>
-                ),
-              },
-            }}
-          />
-        )}
+        renderInput={(params) => {
+          // If a location is selected or the typed text exactly matches one, the
+          // button becomes an edit action for that location instead of "+".
+          const match = getActiveLocation();
+          return (
+            <TextField
+              {...params}
+              label="Location"
+              placeholder="Type to search or select a location..."
+              helperText={match ? 'This location exists — the button edits it.' : 'Optional — clear the field if the box has no fixed location.'}
+              slotProps={{
+                ...params.slotProps,
+                input: {
+                  ...params.slotProps?.input,
+                  endAdornment: (
+                    <>
+                      {allowNewLocation && (
+                        <IconButton
+                          size="small"
+                          color={match ? 'primary' : 'default'}
+                          aria-label={match ? `Edit location ${getLocationLabel(match)}` : 'Add new location'}
+                          title={match ? `Edit existing location ${getLocationLabel(match)}` : 'Add new location'}
+                          onClick={handleOpenLocationStep}
+                        >
+                          {match ? <EditIcon fontSize="small" /> : <AddIcon fontSize="small" />}
+                        </IconButton>
+                      )}
+                      {params.slotProps?.input?.endAdornment}
+                    </>
+                  ),
+                },
+              }}
+            />
+          );
+        }}
       />
+
+      {/* Tags */}
+      <Box sx={{ mt: 2 }}>
+        <TagSelector value={tags} onChange={setTags} />
+      </Box>
 
       <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 2, mt: 3 }}>
         {onCancel && (

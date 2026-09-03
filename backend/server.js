@@ -208,6 +208,32 @@ async function migrateToMultiDatabase() {
   console.log('[Migration] Multi-database migration complete');
 }
 
+// One-time migration for manual database ordering. Assigns a dense `order`
+// value (starting after any existing explicit values) to databases that predate
+// the field, in their current createdAt-based list order so the displayed order
+// is unchanged on upgrade. Idempotent: documents created with this code always
+// carry an explicit order value, so later startups find nothing to do.
+async function migrateDatabaseOrder() {
+  const Database = require('./models/Database');
+
+  const missing = await Database.find({ order: { $exists: false } }).sort({ createdAt: 1 });
+  if (missing.length === 0) return;
+
+  // Start after the highest existing explicit order so assigned values never
+  // collide with databases that already have one.
+  const top = await Database.aggregate([
+    { $match: { order: { $exists: true } } },
+    { $group: { _id: null, maxOrder: { $max: '$order' } } }
+  ]);
+  let next = (top[0]?.maxOrder ?? -1) + 1;
+
+  for (const db of missing) {
+    db.order = next++;
+    await db.save();
+  }
+  console.log(`[Migration] Assigned order values to ${missing.length} database(s)`);
+}
+
 async function main() {
   // Connect to database (exits the process on failure)
   await connectDB();
@@ -219,6 +245,9 @@ async function main() {
   await dropStaleLocationIndex();
   await migrateBoxIdsToUppercase();
   await migrateToMultiDatabase();
+  // Runs after the multi-database migration so a freshly created "Default"
+  // database (first run) also gets an explicit order value.
+  await migrateDatabaseOrder();
 
   // Sync schema indexes (autoIndex is off; this is explicit and ordered).
   const Box = require('./models/Box');

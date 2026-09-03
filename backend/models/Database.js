@@ -13,6 +13,14 @@ const databaseSchema = new mongoose.Schema({
     trim: true
   },
 
+  // Manual display order in the databases list. Databases are listed by
+  // ascending `order`; new ones append at the end (see databaseController).
+  // Existing documents without a value get one from the startup migration.
+  order: {
+    type: Number,
+    default: 0
+  },
+
   createdAt: {
     type: Date,
     default: Date.now
@@ -25,5 +33,7 @@ const databaseSchema = new mongoose.Schema({
 });
 
 databaseSchema.index({ name: 1 }, { unique: true });
+// Supports the list query's sort order (order, then createdAt as tiebreaker).
+databaseSchema.index({ order: 1, createdAt: 1 });
 
 module.exports = mongoose.model('Database', databaseSchema);
