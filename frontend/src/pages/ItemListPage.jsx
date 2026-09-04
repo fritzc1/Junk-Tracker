@@ -40,6 +40,7 @@ import { api } from '../services/api';
 import { useDatabases } from '../context/DatabaseContext';
 import SearchBar from '../components/SearchBar';
 import PaginationBar from '../components/PaginationBar';
+import ItemDialog from '../components/ItemDialog';
 import useRowsPerPage from '../hooks/useRowsPerPage';
 
 // Fixed column set for the items table. Stage 3: one Container column (full
@@ -91,14 +92,6 @@ const getFixedColumnValue = (item, key, containers) => {
     default:
       return '';
   }
-};
-
-// Stage 5: read one attribute value for an item. The sparse `attributes` map
-// arrives as a plain object in JSON responses; blank when the dimension is unset.
-const getAttributeValue = (item, name) => {
-  const attrs = item.attributes;
-  if (!attrs || typeof attrs !== 'object') return '';
-  return String(attrs[name] ?? '');
 };
 
 // Build a parentId -> children index over the flat container list.
@@ -178,6 +171,16 @@ const ItemListPage = () => {
   const [anchorItemId, setAnchorItemId] = useState(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
+
+  // Stage 5 revision: unified item dialog (view/edit/create). `dialogItem` is the
+  // row's item in edit mode or null in create mode — one code path for both.
+  const [itemDialogOpen, setItemDialogOpen] = useState(false);
+  const [dialogItem, setDialogItem] = useState(null);
+
+  const openItemDialog = (targetItem) => {
+    setDialogItem(targetItem || null);
+    setItemDialogOpen(true);
+  };
 
   // Bulk edit state
   const [bulkEditDescription, setBulkEditDescription] = useState('');
@@ -306,10 +309,6 @@ const ItemListPage = () => {
       if (field === 'tags') {
         aVal = (a.tags || []).map(t => t.name).join(', ');
         bVal = (b.tags || []).map(t => t.name).join(', ');
-      } else if (field.startsWith('attribute:')) {
-        // Stage 5: sort on item.attributes.<name>; unset values sort first in asc.
-        aVal = getAttributeValue(a, field.slice('attribute:'.length));
-        bVal = getAttributeValue(b, field.slice('attribute:'.length));
       } else if (field === 'createdAt' || field === 'updatedAt') {
         return direction === 'asc'
           ? new Date(a[field]) - new Date(b[field])
@@ -360,10 +359,6 @@ const ItemListPage = () => {
     let fieldValue = '';
     if (criterion.field === 'tags') {
       fieldValue = (item.tags || []).map(t => t.name).join(', ');
-    } else if (criterion.field.startsWith('attribute:')) {
-      // Stage 5: match against item.attributes.<name> (blank when unset, so
-      // "Is empty" / "Not empty" work naturally).
-      fieldValue = getAttributeValue(item, criterion.field.slice('attribute:'.length));
     } else {
       // The `container` field matches against the full display path.
       fieldValue = getFixedColumnValue(item, criterion.field, containers);
@@ -402,8 +397,6 @@ const ItemListPage = () => {
       const query = searchQuery.toLowerCase();
       const values = [
         ...FIXED_COLUMNS.map(c => getFixedColumnValue(item, c.key, containers)),
-        // Stage 5: attribute values are searchable in basic mode too.
-        ...dimensions.map(d => getAttributeValue(item, d.name)),
         (item.tags || []).map(t => t.name).join(', ')
       ];
       return values.some(val => String(val ?? '').toLowerCase().includes(query));
@@ -453,15 +446,6 @@ const ItemListPage = () => {
   }, [tags, tagFilterId]);
 
   const filteredItems = tagFilteredItems.filter(applySearchFilter);
-
-  // Stage 5: advanced-search column options = fixed set + one per attribute dimension.
-  const searchColumnOptions = useMemo(
-    () => [
-      ...FIXED_SEARCH_COLUMN_OPTIONS,
-      ...dimensions.map(d => ({ id: `attribute:${d.name}`, label: `Attribute: ${d.name}` })),
-    ],
-    [dimensions]
-  );
 
   // ---- Bulk Edit Logic ----
   const selectedItemsList = items.filter(item => selectedItems.has(item._id));
@@ -693,22 +677,27 @@ const ItemListPage = () => {
     }
   };
 
-  const handleEdit = (itemId) => {
-    navigate(`/edit/${itemId}`);
+  // Stage 5 revision: editing opens the unified dialog in place of navigating to
+  // the old /edit/:id page (that route still exists until the follow-up cleanup).
+  const handleEdit = (item) => {
+    openItemDialog(item);
   };
 
-  // Total column count for colSpan: checkbox + fixed columns + attribute
-  // columns (Stage 5, dynamic) + tags + created + modified + actions
-  const totalColumns = 1 + FIXED_COLUMNS.length + dimensions.length + 4;
+  // Total column count for colSpan: checkbox + fixed columns + tags + created +
+  // modified + actions. Stage 5 revision: the dynamic attribute columns are gone —
+  // attributes live in the item dialog now, not in the table.
+  const totalColumns = 1 + FIXED_COLUMNS.length + 4;
 
   return (
     <Container maxWidth="xl" sx={{ mt: 4, mb: 4 }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
         <Typography variant="h4">Items</Typography>
+        {/* Stage 5 revision: "Add New Item" opens the unified dialog in create
+            mode (item === null) — same code path as editing. */}
         <Button
           variant="contained"
           startIcon={<AddIcon />}
-          onClick={() => navigate('/entry')}
+          onClick={() => openItemDialog(null)}
         >
           Add New Item
         </Button>
@@ -728,7 +717,7 @@ const ItemListPage = () => {
         placeholder="Search across all columns..."
         mode={searchMode}
         setMode={setSearchMode}
-        columnOptions={searchColumnOptions}
+        columnOptions={FIXED_SEARCH_COLUMN_OPTIONS}
         getSelectedColumnOption={getSelectedColumnOption}
         searchCriteria={searchCriteria}
         addCriterion={addSearchCriterion}
@@ -780,19 +769,9 @@ const ItemListPage = () => {
                 </TableCell>
               ))}
 
-              {/* Stage 5: one dynamic column per defined attribute dimension,
-                  after the fixed columns. Sortable on item.attributes.<name>;
-                  renders nothing when the database has no dimensions. */}
-              {dimensions.map(dim => (
-                <TableCell key={`attribute:${dim.name}`}>
-                  <Box sx={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 0.5 }} onClick={() => handleSort(`attribute:${dim.name}`)}>
-                    <strong>{dim.name}</strong>
-                    {sortConfig.field === `attribute:${dim.name}` && (
-                      sortConfig.direction === 'asc' ? <ArrowUpwardIcon fontSize="small" /> : <ArrowDownwardIcon fontSize="small" />
-                    )}
-                  </Box>
-                </TableCell>
-              ))}
+              {/* Stage 5 revision: no dynamic attribute columns — the table shows
+                  only Description / Container / Tags (+ dates/actions). Attributes
+                  are viewed/edited per item in the ItemDialog. */}
               <TableCell>
                 <Box sx={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 0.5 }} onClick={() => handleSort('tags')}>
                   <strong>Tags</strong>
@@ -851,7 +830,17 @@ const ItemListPage = () => {
                       : item.containerId;
                     return (
                       <TableCell key={col.key}>
-                        {col.key === 'container' && containerRef ? (
+                        {col.key === 'description' ? (
+                          // Stage 5 revision: the description is clickable and opens
+                          // the unified dialog for this item (view + edit in one place).
+                          <Typography
+                            component="span"
+                            sx={{ color: 'primary.main', cursor: 'pointer' }}
+                            onClick={() => openItemDialog(item)}
+                          >
+                            {item.description || '-'}
+                          </Typography>
+                        ) : col.key === 'container' && containerRef ? (
                           // The display path is a link to the Containers page filtered
                           // to this container (mirrors the old box-link pattern).
                           <Typography
@@ -867,12 +856,6 @@ const ItemListPage = () => {
                       </TableCell>
                     );
                   })}
-                  {/* Stage 5: attribute values (empty cell when unset) */}
-                  {dimensions.map(dim => (
-                    <TableCell key={`attribute:${dim.name}`}>
-                      {getAttributeValue(item, dim.name)}
-                    </TableCell>
-                  ))}
                   {/* Tags */}
                   <TableCell>
                     {(item.tags || []).map(tag => (
@@ -883,7 +866,7 @@ const ItemListPage = () => {
                   <TableCell>{new Date(item.updatedAt).toLocaleString()}</TableCell>
                   <TableCell align="right">
                     <Tooltip title="Edit">
-                      <IconButton onClick={() => handleEdit(item._id)} size="small">
+                      <IconButton onClick={() => handleEdit(item)} size="small">
                         <EditIcon />
                       </IconButton>
                     </Tooltip>
@@ -943,6 +926,15 @@ const ItemListPage = () => {
           </Button>
         </Box>
       )}
+
+      {/* Unified item dialog — view/edit (item set) or create (item === null).
+          On successful save it closes itself and asks the list to refresh. */}
+      <ItemDialog
+        open={itemDialogOpen}
+        onClose={() => setItemDialogOpen(false)}
+        item={dialogItem}
+        onSaved={fetchItems}
+      />
 
       {/* Bulk Edit Dialog */}
       <Dialog open={bulkEditOpen} onClose={() => setBulkEditOpen(false)} maxWidth="sm" fullWidth>
