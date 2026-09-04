@@ -800,7 +800,18 @@ const ItemListPage = () => {
                   </TableCell>
                   {FIXED_COLUMNS.map(col => (
                     <TableCell key={col.key}>
-                      {getFixedColumnValue(item, col.key, locations, boxes) || '-'}
+                      {col.key === 'boxId' && item.boxId?._id ? (
+                        // Box ID is a link to the Boxes page filtered to this box.
+                        <Typography
+                          component="span"
+                          sx={{ color: 'primary.main', cursor: 'pointer' }}
+                          onClick={() => navigate(`/boxes?boxId=${item.boxId._id}`)}
+                        >
+                          {getBoxIdValue(item, boxes) || '(no ID)'}
+                        </Typography>
+                      ) : (
+                        getFixedColumnValue(item, col.key, locations, boxes) || '-'
+                      )}
                     </TableCell>
                   ))}
                   {/* Tags */}

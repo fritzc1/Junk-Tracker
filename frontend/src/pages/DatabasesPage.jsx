@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import {
   Alert,
   Box,
@@ -31,6 +31,8 @@ import {
 } from '@mui/material';
 import {
   Add as AddIcon,
+  ArrowDownward as ArrowDownwardIcon,
+  ArrowUpward as ArrowUpwardIcon,
   CheckCircle as CheckCircleIcon,
   Delete as DeleteIcon,
   Download as DownloadIcon,
@@ -70,6 +72,13 @@ const DatabasesPage = () => {
 
   // ---- Delete state ----
   const [deleteTarget, setDeleteTarget] = useState(null);
+
+  // ---- Reorder state ----
+  // Local display order override (array of database IDs). Null means "use the
+  // server order from context". Set optimistically on move; cleared after a
+  // successful API call and restored to the previous value on failure.
+  const [reorderedIds, setReorderedIds] = useState(null);
+  const [movingId, setMovingId] = useState(null);
 
   // ---- Export state ----
   const [exportFormat, setExportFormat] = useState('csv');
@@ -154,6 +163,50 @@ const DatabasesPage = () => {
 
   const handleSelectDatabase = (db) => {
     selectDatabase(db._id);
+  };
+
+  // ---- Reorder ----
+
+  // Databases in display order: the local override when set, otherwise the
+  // server order from context. Rows missing from the list are ignored so a
+  // stale override can never hide or duplicate entries.
+  const displayedDatabases = useMemo(() => {
+    if (!reorderedIds) return databases;
+    const byId = new Map(databases.map(db => [db._id, db]));
+    return reorderedIds.map(id => byId.get(id)).filter(Boolean);
+  }, [databases, reorderedIds]);
+
+  // Move a database one position up or down. Optimistic: the local order is
+  // applied immediately and rolled back if the API call fails.
+  const handleMoveDatabase = async (id, direction) => {
+    const ids = displayedDatabases.map(db => db._id);
+    const fromIndex = ids.indexOf(id);
+    const toIndex = fromIndex + direction;
+    if (fromIndex < 0 || toIndex < 0 || toIndex >= ids.length) return;
+
+    setMovingId(id);
+    const previousIds = reorderedIds; // null or the prior override
+    const nextIds = [...ids];
+    [nextIds[fromIndex], nextIds[toIndex]] = [nextIds[toIndex], nextIds[fromIndex]];
+    setReorderedIds(nextIds);
+
+    try {
+      const result = await api.reorderDatabases(nextIds);
+      if (result.success) {
+        // Server now matches the local order; drop the override and refresh
+        // so item counts / any other server state stay in sync.
+        setReorderedIds(null);
+        refreshDatabases();
+      } else {
+        setReorderedIds(previousIds);
+        flashError(result.error || 'Failed to reorder databases');
+      }
+    } catch (err) {
+      setReorderedIds(previousIds);
+      flashError('Error reordering databases: ' + err.message);
+    } finally {
+      setMovingId(null);
+    }
   };
 
   // ---- Export (scoped to the active database) ----
@@ -337,11 +390,12 @@ const DatabasesPage = () => {
                   <TableCell>Name</TableCell>
                   <TableCell align="right">Items</TableCell>
                   <TableCell align="center">Active</TableCell>
+                  <TableCell align="center" sx={{ width: 80 }}>Move</TableCell>
                   <TableCell align="right" sx={{ width: 90 }} />
                 </TableRow>
               </TableHead>
               <TableBody>
-                {databases.map(db => (
+                {displayedDatabases.map((db, index) => (
                   <TableRow key={db._id} hover selected={db._id === activeDatabase?._id}>
                     <TableCell>
                       <ListItemText primary={db.name} />
@@ -363,6 +417,32 @@ const DatabasesPage = () => {
                           />
                         </Tooltip>
                       )}
+                    </TableCell>
+                    <TableCell align="center">
+                      <Tooltip title={index === 0 ? 'Already first' : `Move "${db.name}" up`}>
+                        <span>
+                          <IconButton
+                            size="small"
+                            disabled={index === 0 || movingId !== null}
+                            onClick={() => handleMoveDatabase(db._id, -1)}
+                            aria-label={`Move ${db.name} up`}
+                          >
+                            <ArrowUpwardIcon fontSize="small" />
+                          </IconButton>
+                        </span>
+                      </Tooltip>
+                      <Tooltip title={index === displayedDatabases.length - 1 ? 'Already last' : `Move "${db.name}" down`}>
+                        <span>
+                          <IconButton
+                            size="small"
+                            disabled={index === displayedDatabases.length - 1 || movingId !== null}
+                            onClick={() => handleMoveDatabase(db._id, 1)}
+                            aria-label={`Move ${db.name} down`}
+                          >
+                            <ArrowDownwardIcon fontSize="small" />
+                          </IconButton>
+                        </span>
+                      </Tooltip>
                     </TableCell>
                     <TableCell align="right">
                       <Tooltip title="Rename">

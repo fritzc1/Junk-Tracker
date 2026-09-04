@@ -1,7 +1,26 @@
 const mongoose = require('mongoose');
 const Box = require('../models/Box');
 const Item = require('../models/Item');
+const Tag = require('../models/Tag');
 const { normalizeBoxId } = require('../utils/boxId');
+
+// Resolve tag names to IDs, auto-creating any missing tags (scoped to the
+// active database). Mirrors the item controller's tag handling so boxes and
+// items share one tag namespace. Returns [] for empty/invalid input.
+const resolveTagNames = async (tagNames, databaseId) => {
+  if (!Array.isArray(tagNames)) return [];
+  const tagIds = [];
+  for (const tagName of tagNames) {
+    if (!tagName || !String(tagName).trim()) continue;
+    const name = String(tagName).trim().toLowerCase();
+    let existingTag = await Tag.findOne({ name, databaseId });
+    if (!existingTag) {
+      existingTag = await Tag.create({ name, databaseId });
+    }
+    tagIds.push(existingTag._id);
+  }
+  return tagIds;
+};
 
 // @desc    Create a new box
 // @route   POST /api/boxes
@@ -9,7 +28,7 @@ const { normalizeBoxId } = require('../utils/boxId');
 const createBox = async (req, res) => {
   try {
     const databaseId = req.databaseId;
-    const { boxId, locationId } = req.body;
+    const { boxId, locationId, tagNames } = req.body;
 
     // Normalize to the canonical stored form (trimmed + uppercase) so identity
     // is case-insensitive: "a06" and "A06" are the same box.
@@ -30,7 +49,8 @@ const createBox = async (req, res) => {
     const box = await Box.create({
       databaseId,
       boxId: normalizedBoxId || undefined,
-      locationId: locationId || null
+      locationId: locationId || null,
+      tags: await resolveTagNames(tagNames, databaseId)
     });
 
     console.log(`[Box] Created: "${box.boxId || '(no ID)'}"`);
@@ -79,15 +99,34 @@ const getBoxes = async (req, res) => {
           as: 'locationPopulated'
         }
       },
+      // Lookup tags (name only — enough for chips, search, and filtering)
+      {
+        $lookup: {
+          from: 'tags',
+          localField: 'tags',
+          foreignField: '_id',
+          as: 'tagsPopulated'
+        }
+      },
       {
         $addFields: {
           itemCount: { $size: '$items' },
-          locationPopulated: { $arrayElemAt: ['$locationPopulated', 0] }
+          locationPopulated: { $arrayElemAt: ['$locationPopulated', 0] },
+          // Replace the raw tags ObjectId array with populated {_id, name}
+          // objects (frontend renders chips and filters by tag from this field).
+          tags: {
+            $map: {
+              input: '$tagsPopulated',
+              as: 'tag',
+              in: { _id: '$$tag._id', name: '$$tag.name' }
+            }
+          }
         }
       },
       {
         $project: {
           items: 0,
+          tagsPopulated: 0,
           'locationPopulated.data': 0,
           'locationPopulated.createdAt': 0,
           'locationPopulated.updatedAt': 0
@@ -124,7 +163,9 @@ const getBoxes = async (req, res) => {
 // @access  Public
 const getBoxById = async (req, res) => {
   try {
-    const box = await Box.findOne({ _id: req.params.id, databaseId: req.databaseId });
+    // Populate tags so the edit form can prefill the TagSelector with names.
+    const box = await Box.findOne({ _id: req.params.id, databaseId: req.databaseId })
+      .populate('tags', 'name');
 
     if (!box) {
       return res.status(404).json({
@@ -186,7 +227,7 @@ const getBoxItems = async (req, res) => {
 const updateBox = async (req, res) => {
   try {
     const databaseId = req.databaseId;
-    const { boxId, locationId } = req.body;
+    const { boxId, locationId, tagNames } = req.body;
 
     let box = await Box.findOne({ _id: req.params.id, databaseId });
 
@@ -214,6 +255,12 @@ const updateBox = async (req, res) => {
     box.boxId = newBoxId || undefined;
     if (locationId !== undefined) {
       box.locationId = locationId || null;
+    }
+
+    // Handle tags from names (auto-create missing ones). Only applied when the
+    // field is present so a partial update never wipes existing tags.
+    if (tagNames && Array.isArray(tagNames)) {
+      box.tags = await resolveTagNames(tagNames, databaseId);
     }
 
     box = await box.save();

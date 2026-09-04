@@ -117,6 +117,28 @@ async function ensureCaseInsensitiveBoxIndex() {
   );
 }
 
+// Ensure the Container indexes are in place (Stage 1): the partial
+// case-insensitive unique (databaseId, boxId) index for kind='box' docs and the
+// per-database tree-query compound index. Idempotent — createIndex is a no-op
+// when an identical index already exists. Must stay in sync with models/Container.js.
+async function ensureContainerIndexes() {
+  const collection = mongoose.connection.collection('containers');
+
+  await collection.createIndex(
+    { databaseId: 1, boxId: 1 },
+    {
+      unique: true,
+      collation: { locale: 'en', strength: 2 },
+      // ($gt instead of $ne — MongoDB partial filters don't support $ne)
+      partialFilterExpression: {
+        $and: [{ kind: 'box' }, { boxId: { $type: 'string' } }, { boxId: { $gt: '' } }]
+      }
+    }
+  );
+
+  await collection.createIndex({ databaseId: 1, parentId: 1 });
+}
+
 // One-time migration for multi-database support. Creates a "Default" database
 // only when no databases exist yet (true first run), backfills every existing
 // data document with its ID (so pre-existing data is preserved and visible),
@@ -193,6 +215,24 @@ async function migrateToMultiDatabase() {
   }
   await locations.createIndex({ databaseId: 1, name: 1, subLocation: 1 }, { unique: true });
 
+  // Container indexes (Stage 1): the partial case-insensitive unique boxId
+  // index and the tree-query compound index. Created here so a containers
+  // collection that predates the schema declaration still gets them; must stay
+  // in sync with models/Container.js and ensureContainerIndexes() below.
+  const containers = mongoose.connection.collection('containers');
+  await containers.createIndex(
+    { databaseId: 1, boxId: 1 },
+    {
+      unique: true,
+      collation: { locale: 'en', strength: 2 },
+      // ($gt instead of $ne — MongoDB partial filters don't support $ne)
+      partialFilterExpression: {
+        $and: [{ kind: 'box' }, { boxId: { $type: 'string' } }, { boxId: { $gt: '' } }]
+      }
+    }
+  );
+  await containers.createIndex({ databaseId: 1, parentId: 1 });
+
   const tags = mongoose.connection.collection('tags');
   try {
     const tagIndexes = await tags.indexes();
@@ -208,6 +248,32 @@ async function migrateToMultiDatabase() {
   console.log('[Migration] Multi-database migration complete');
 }
 
+// One-time migration for manual database ordering. Assigns a dense `order`
+// value (starting after any existing explicit values) to databases that predate
+// the field, in their current createdAt-based list order so the displayed order
+// is unchanged on upgrade. Idempotent: documents created with this code always
+// carry an explicit order value, so later startups find nothing to do.
+async function migrateDatabaseOrder() {
+  const Database = require('./models/Database');
+
+  const missing = await Database.find({ order: { $exists: false } }).sort({ createdAt: 1 });
+  if (missing.length === 0) return;
+
+  // Start after the highest existing explicit order so assigned values never
+  // collide with databases that already have one.
+  const top = await Database.aggregate([
+    { $match: { order: { $exists: true } } },
+    { $group: { _id: null, maxOrder: { $max: '$order' } } }
+  ]);
+  let next = (top[0]?.maxOrder ?? -1) + 1;
+
+  for (const db of missing) {
+    db.order = next++;
+    await db.save();
+  }
+  console.log(`[Migration] Assigned order values to ${missing.length} database(s)`);
+}
+
 async function main() {
   // Connect to database (exits the process on failure)
   await connectDB();
@@ -219,6 +285,9 @@ async function main() {
   await dropStaleLocationIndex();
   await migrateBoxIdsToUppercase();
   await migrateToMultiDatabase();
+  // Runs after the multi-database migration so a freshly created "Default"
+  // database (first run) also gets an explicit order value.
+  await migrateDatabaseOrder();
 
   // Sync schema indexes (autoIndex is off; this is explicit and ordered).
   const Box = require('./models/Box');
@@ -226,17 +295,23 @@ async function main() {
   const Location = require('./models/Location');
   const Tag = require('./models/Tag');
   const Database = require('./models/Database');
+  const Container = require('./models/Container');
   await Promise.all([
     Box.syncIndexes(),
     Item.syncIndexes(),
     Location.syncIndexes(),
     Tag.syncIndexes(),
-    Database.syncIndexes()
+    Database.syncIndexes(),
+    Container.syncIndexes()
   ]);
 
   // Final index check: guarantees the case-insensitive unique boxId index is in
   // place even on databases created before it was declared on the schema.
   await ensureCaseInsensitiveBoxIndex();
+
+  // Same guarantee for the Stage 1 container indexes (partial unique boxId +
+  // tree-query compound).
+  await ensureContainerIndexes();
 
   app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
@@ -247,12 +322,19 @@ const app = express();
 
 // Middleware
 app.use(cors());
-app.use(express.json());
+// 5mb body limit: JSON snapshot imports (POST /api/items/import/json) carry a
+// full database — containers + items + tags — which easily exceeds the default
+// 100kb for anything but tiny databases. CSV/XLSX uploads go through multer and
+// are unaffected by this limit.
+app.use(express.json({ limit: '5mb' }));
 
 // Routes — all data routes are scoped to the active logical database, resolved
 // from the X-Database-Id header (see middleware/requireDatabase.js).
 app.use('/api/items', requireDatabase, require('./routes/items'));
 app.use('/api/tags', requireDatabase, require('./routes/tags'));
+// Stage 2: unified container API. The old /api/locations and /api/boxes routes
+// stay mounted until Stage 7 so the not-yet-updated frontend keeps working.
+app.use('/api/containers', requireDatabase, require('./routes/containers'));
 app.use('/api/locations', requireDatabase, require('./routes/locations'));
 app.use('/api/boxes', requireDatabase, require('./routes/boxes'));
 
@@ -260,7 +342,7 @@ app.use('/api/boxes', requireDatabase, require('./routes/boxes'));
 app.use('/api/databases', require('./routes/databases'));
 
 // @route   DELETE /api/data/clear-all
-// @desc    Wipe ALL data in the ACTIVE database (items, boxes, locations, tags, and any leftover customfields)
+// @desc    Wipe ALL data in the ACTIVE database (items, containers, boxes, locations, tags, and any leftover customfields)
 app.delete('/api/data/clear-all', requireDatabase, async (req, res) => {
   try {
     const db = mongoose.connection.db;
@@ -268,6 +350,9 @@ app.delete('/api/data/clear-all', requireDatabase, async (req, res) => {
     const databaseId = new mongoose.Types.ObjectId(req.databaseId);
     await Promise.all([
       db.collection('items').deleteMany({ databaseId }),
+      // Stage 2: containers are the live container store now (old boxes/locations
+      // docs stay until Stage 7 but are wiped too so a cleared database is empty).
+      db.collection('containers').deleteMany({ databaseId }),
       db.collection('boxes').deleteMany({ databaseId }),
       db.collection('locations').deleteMany({ databaseId }),
       db.collection('tags').deleteMany({ databaseId }),

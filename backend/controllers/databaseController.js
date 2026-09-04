@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 const Database = require('../models/Database');
 const Item = require('../models/Item');
+const Container = require('../models/Container');
 const Box = require('../models/Box');
 const Location = require('../models/Location');
 const Tag = require('../models/Tag');
@@ -13,7 +14,9 @@ const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 // @access  Public
 const getDatabases = async (req, res) => {
   try {
-    const databases = await Database.find().sort({ createdAt: 1 });
+    // Manual order first; createdAt breaks ties for any documents that still
+    // lack an explicit order value (pre-migration edge case).
+    const databases = await Database.find().sort({ order: 1, createdAt: 1 });
 
     // One grouped count query across all items; map by databaseId.
     const counts = await Item.aggregate([
@@ -49,7 +52,13 @@ const createDatabase = async (req, res) => {
       return res.status(400).json({ success: false, error: 'A database with this name already exists.' });
     }
 
-    const db = await Database.create({ name });
+    // New databases append at the end of the list.
+    const top = await Database.aggregate([
+      { $group: { _id: null, maxOrder: { $max: '$order' } } }
+    ]);
+    const order = (top[0]?.maxOrder ?? -1) + 1;
+
+    const db = await Database.create({ name, order });
     console.log(`[Database] Created: "${db.name}"`);
     res.status(201).json({ success: true, data: { ...db.toObject(), itemCount: 0 } });
   } catch (error) {
@@ -98,7 +107,7 @@ const renameDatabase = async (req, res) => {
   }
 };
 
-// @desc    Delete a database and ALL of its data (items, boxes, locations, tags)
+// @desc    Delete a database and ALL of its data (items, containers, boxes, locations, tags)
 // @route   DELETE /api/databases/:id
 // @access  Public
 const deleteDatabase = async (req, res) => {
@@ -121,9 +130,12 @@ const deleteDatabase = async (req, res) => {
     // items in OTHER databases that reference them (tags are per-database).
     const ownTagIds = await Tag.find({ databaseId: db._id }).distinct('_id');
 
-    // Wipe all data for this database.
+    // Wipe all data for this database. Containers (Stage 2) are wiped too so no
+    // orphaned container docs survive the deletion; old boxes/locations stay in
+    // their collections until Stage 7 but are removed per-database here as well.
     await Promise.all([
       Item.deleteMany({ databaseId: db._id }),
+      Container.deleteMany({ databaseId: db._id }),
       Box.deleteMany({ databaseId: db._id }),
       Location.deleteMany({ databaseId: db._id }),
       Tag.deleteMany({ databaseId: db._id })
@@ -147,4 +159,37 @@ const deleteDatabase = async (req, res) => {
   }
 };
 
-module.exports = { getDatabases, createDatabase, renameDatabase, deleteDatabase };
+// @desc    Reorder databases — body must contain the FULL list of database IDs
+//          in the desired display order; all rows are renumbered 0..n-1.
+// @route   PUT /api/databases/reorder
+// @access  Public
+const reorderDatabases = async (req, res) => {
+  try {
+    const orderedIds = req.body?.orderedIds;
+    if (!Array.isArray(orderedIds)) {
+      return res.status(400).json({ success: false, error: 'orderedIds must be an array of database IDs' });
+    }
+
+    // Validate the payload is exactly the current set of databases (no missing,
+    // extra, or unknown IDs) before writing anything.
+    const existing = await Database.find().select('_id');
+    const existingIds = new Set(existing.map(db => String(db._id)));
+    if (orderedIds.length !== existingIds.size || orderedIds.some(id => !existingIds.has(String(id)))) {
+      return res.status(400).json({ success: false, error: 'Reorder list does not match the current databases' });
+    }
+
+    // Renumber in one bulk write; each update targets a single document by _id.
+    const updates = orderedIds.map((id, index) => ({
+      updateOne: { filter: { _id: id }, update: { $set: { order: index, updatedAt: new Date() } } }
+    }));
+    await Database.bulkWrite(updates);
+
+    console.log(`[Database] Reordered ${orderedIds.length} database(s)`);
+    res.status(200).json({ success: true, data: {} });
+  } catch (error) {
+    console.error('[Database] Error reordering databases:', error.message);
+    res.status(500).json({ success: false, error: 'Server Error' });
+  }
+};
+
+module.exports = { getDatabases, createDatabase, renameDatabase, deleteDatabase, reorderDatabases };

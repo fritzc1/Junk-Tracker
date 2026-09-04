@@ -149,5 +149,13 @@ export const api = {
       body: JSON.stringify({ name }),
     }),
 
-  deleteDatabase: async (id) => request(`/databases/${id}`, { method: 'DELETE' })
+  deleteDatabase: async (id) => request(`/databases/${id}`, { method: 'DELETE' }),
+
+  // Reorder databases — pass the FULL list of database IDs in the desired order.
+  reorderDatabases: async (orderedIds) =>
+    request('/databases/reorder', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ orderedIds }),
+    })
 };

@@ -27,6 +27,7 @@ import {
   Edit as EditIcon,
   Delete as DeleteIcon,
   FormatListBulleted as FormatListBulletedIcon,
+  Inventory2 as Inventory2Icon,
 } from '@mui/icons-material';
 import { api } from '../services/api';
 import { useDatabases } from '../context/DatabaseContext';
@@ -118,6 +119,11 @@ const TagListPage = () => {
     navigate(`/items?tagId=${tag._id}`);
   };
 
+  // Navigate to the Boxes page filtered by this tag (?tagId=...).
+  const handleViewBoxes = (tag) => {
+    navigate(`/boxes?tagId=${tag._id}`);
+  };
+
   const handleDeleteConfirm = async () => {
     try {
       await api.deleteTag(tagToDelete._id);
@@ -176,18 +182,19 @@ const TagListPage = () => {
             <TableRow>
               <TableCell><strong>Name</strong></TableCell>
               <TableCell align="right"><strong>Items</strong></TableCell>
+              <TableCell align="right"><strong>Boxes</strong></TableCell>
               <TableCell align="right"><strong>Actions</strong></TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={3} sx={{ textAlign: 'center' }}>Loading...</TableCell>
+                <TableCell colSpan={4} sx={{ textAlign: 'center' }}>Loading...</TableCell>
               </TableRow>
             ) : tags.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={3} sx={{ textAlign: 'center' }}>
-                  No tags found. Add a tag to get started, or create tags while adding items.
+                <TableCell colSpan={4} sx={{ textAlign: 'center' }}>
+                  No tags found. Add a tag to get started, or create tags while adding items or boxes.
                 </TableCell>
               </TableRow>
             ) : (
@@ -203,10 +210,16 @@ const TagListPage = () => {
                     </Typography>
                   </TableCell>
                   <TableCell align="right">{tag.itemCount || 0}</TableCell>
+                  <TableCell align="right">{tag.boxCount || 0}</TableCell>
                   <TableCell align="right">
                     <Tooltip title="View Items">
                       <IconButton onClick={() => handleViewItems(tag)} size="small">
                         <FormatListBulletedIcon />
+                      </IconButton>
+                    </Tooltip>
+                    <Tooltip title="View Boxes">
+                      <IconButton onClick={() => handleViewBoxes(tag)} size="small">
+                        <Inventory2Icon />
                       </IconButton>
                     </Tooltip>
                     <Tooltip title="Edit Tag">
