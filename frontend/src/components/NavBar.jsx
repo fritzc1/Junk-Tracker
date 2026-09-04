@@ -23,11 +23,13 @@ import StorageIcon from '@mui/icons-material/Storage';
 import { useDatabases } from '../context/DatabaseContext';
 
 // Top-level sections and the route prefixes that map to each one.
-// Entry/edit pages highlight their parent section (e.g. /box-edit/:id → Boxes).
+// Entry/edit pages highlight their parent section (e.g. /edit/:id → Items).
 const SECTIONS = [
   { label: 'Items', value: 'items', paths: ['/', '/items', '/entry', '/edit'] },
-  { label: 'Boxes', value: 'boxes', paths: ['/boxes', '/box-entry', '/box-edit'] },
-  { label: 'Locations', value: 'locations', paths: ['/locations', '/location-entry', '/location-edit'] },
+  // Stage 3: one Containers section replaces the old Boxes + Locations tabs.
+  // The legacy /boxes and /locations prefixes still resolve here so deep links
+  // (which redirect to /containers) keep highlighting the right tab.
+  { label: 'Containers', value: 'containers', paths: ['/containers', '/boxes', '/locations'] },
   { label: 'Tags', value: 'tags', paths: ['/tags'] },
   // Databases is reachable only via the active-database chip, not a tab.
   // It stays in SECTIONS so route resolution recognizes /databases (chip highlight).
@@ -37,8 +39,7 @@ const SECTIONS = [
 
 const NAV_TARGETS = {
   items: '/',
-  boxes: '/boxes',
-  locations: '/locations',
+  containers: '/containers',
   tags: '/tags',
   settings: '/settings',
 };

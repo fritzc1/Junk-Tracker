@@ -42,15 +42,12 @@ import SearchBar from '../components/SearchBar';
 import PaginationBar from '../components/PaginationBar';
 import useRowsPerPage from '../hooks/useRowsPerPage';
 
-// Fixed column set for the items table. Values resolve from entity references:
-//   Location / Sub-Location → Location entity (via box.locationId or item.locationId)
-//   Item Description        → item.description
-//   Box ID                  → box.boxId
+// Fixed column set for the items table. Stage 3: one Container column (full
+// display path) replaces the old Location / Sub-Location / Box ID columns —
+// items reference a single containerId now.
 const FIXED_COLUMNS = [
   { key: 'description', label: 'Item Description' },
-  { key: 'location', label: 'Location' },
-  { key: 'subLocation', label: 'Sub-Location' },
-  { key: 'boxId', label: 'Box ID' },
+  { key: 'container', label: 'Container' },
 ];
 
 // Advanced search column options (fixed set)
@@ -59,57 +56,102 @@ const SEARCH_COLUMN_OPTIONS = [
   { id: 'tags', label: 'Tags' },
 ];
 
-// Resolve the Location entity for an item (via box, or direct reference).
-// Handles both populated objects and raw ObjectId strings.
-const resolveItemLocationEntity = (item, locations) => {
-  const findLocById = (id) => locations.find(l => String(l._id) === String(id)) || null;
-  if (item.boxId?.locationId) {
-    const ref = item.boxId.locationId;
-    return (ref && typeof ref === 'object' && ref.name !== undefined) ? ref : findLocById(ref?._id ?? ref);
+// Full display path for an item's container. The backend attaches `displayPath`
+// to every item response; the populated-container fallback covers any client
+// that receives items without it (e.g., a stale cache).
+const getContainerPath = (item, containers) => {
+  if (item.displayPath) return String(item.displayPath);
+  const ref = item.containerId;
+  if (!ref || typeof ref !== 'object' || !ref._id) return '';
+  // Walk the populated chain is not available here — resolve via the flat list.
+  const byId = new Map((containers || []).map(c => [String(c._id), c]));
+  let cursor = byId.get(String(ref._id));
+  if (!cursor) {
+    // Populated object without a full tree: show its own name + boxId hint.
+    return String(ref.name || '');
   }
-  if (item.locationId) {
-    const ref = item.locationId;
-    return (typeof ref === 'object' && ref.name !== undefined) ? ref : findLocById(ref?._id ?? ref);
+  const parts = [];
+  const seen = new Set();
+  while (cursor && !seen.has(String(cursor._id))) {
+    seen.add(String(cursor._id));
+    parts.unshift(String(cursor.name));
+    cursor = cursor.parentId ? byId.get(String(cursor.parentId)) : null;
   }
-  return null;
-};
-
-// Resolved location parts for an item
-const getLocationParts = (item, locations) => {
-  const loc = resolveItemLocationEntity(item, locations);
-  if (!loc || !(loc.name || loc.subLocation)) return { name: '', subLocation: '' };
-  return { name: String(loc.name || ''), subLocation: String(loc.subLocation || '') };
-};
-
-// Resolved box ID string for an item (boxed items only)
-const getBoxIdValue = (item, boxes) => {
-  if (!item.boxId?._id) return '';
-  const populated = typeof item.boxId === 'object' && item.boxId.boxId !== undefined;
-  if (populated) return String(item.boxId.boxId || '');
-  const box = boxes.find(b => b._id === item.boxId);
-  return box ? String(box.boxId || '') : '';
+  return parts.join(' / ');
 };
 
 // Display value for a fixed column on an item
-const getFixedColumnValue = (item, key, locations, boxes) => {
+const getFixedColumnValue = (item, key, containers) => {
   switch (key) {
-    case 'location':
-      return getLocationParts(item, locations).name;
-    case 'subLocation':
-      return getLocationParts(item, locations).subLocation;
     case 'description':
       return String(item.description || '');
-    case 'boxId':
-      return getBoxIdValue(item, boxes);
+    case 'container':
+      return getContainerPath(item, containers);
     default:
       return '';
   }
 };
 
+// Build a parentId -> children index over the flat container list.
+const buildChildrenByParent = (containers) => {
+  const map = new Map();
+  for (const c of containers || []) {
+    const key = c.parentId ? String(c.parentId) : null;
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(c);
+  }
+  return map;
+};
+
+// All descendant ids of a container (BFS with cycle guard). Used by the
+// ?containerId= filter so "view items" on a parent shows its whole subtree —
+// matching how the old location filter behaved for locations.
+const collectDescendantIds = (containers, rootId) => {
+  const childrenByParent = buildChildrenByParent(containers);
+  const descendants = new Set();
+  let queue = [...(childrenByParent.get(String(rootId)) || [])];
+  while (queue.length > 0) {
+    const next = [];
+    for (const c of queue) {
+      const id = String(c._id);
+      if (descendants.has(id)) continue;
+      descendants.add(id);
+      next.push(...(childrenByParent.get(id) || []));
+    }
+    queue = next;
+  }
+  return descendants;
+};
+
+// Indented label for the bulk-edit container tree dropdown.
+const getContainerTreeLabel = (c, depthMap) => {
+  if (!c) return '';
+  const indent = '\u00A0'.repeat((depthMap.get(String(c._id)) || 0) * 2);
+  return `${indent}${c.kind === 'box' ? '▣ ' : ''}${c.name}`;
+};
+
+// Depth of every container (for the tree dropdown indentation).
+const computeContainerDepthMap = (containers) => {
+  const byId = new Map((containers || []).map(c => [String(c._id), c]));
+  const depth = new Map();
+  for (const c of containers || []) {
+    let d = 0;
+    const seen = new Set([String(c._id)]);
+    let cursor = c.parentId ? byId.get(String(c.parentId)) : null;
+    while (cursor && !seen.has(String(cursor._id))) {
+      d += 1;
+      seen.add(String(cursor._id));
+      cursor = cursor.parentId ? byId.get(String(cursor.parentId)) : null;
+    }
+    depth.set(String(c._id), d);
+  }
+  return depth;
+};
+
 const ItemListPage = () => {
   const [items, setItems] = useState([]);
-  const [boxes, setBoxes] = useState([]);
-  const [locations, setLocations] = useState([]);
+  // Stage 3: one flat container list replaces the old boxes + locations lists.
+  const [containers, setContainers] = useState([]);
   const [tags, setTags] = useState([]);
 
   // Search state
@@ -134,10 +176,9 @@ const ItemListPage = () => {
   const [bulkEditTags, setBulkEditTags] = useState(null);     // null = various/unchanged, array = unified value
   const [bulkEditTagsChanged, setBulkEditTagsChanged] = useState(false);
   const [bulkEditTagMode, setBulkEditTagMode] = useState('replace'); // 'replace' | 'add' (append to existing)
-  const [bulkEditBoxId, setBulkEditBoxId] = useState('');       // prefilled shared box id ('' when none/various)
-  const [bulkEditBoxTouched, setBulkEditBoxTouched] = useState(false);
-  const [bulkEditLocationId, setBulkEditLocationId] = useState(''); // prefilled shared direct location id ('' when none/various)
-  const [bulkEditLocationTouched, setBulkEditLocationTouched] = useState(false);
+  // Stage 3: single "move to container" control replaces the old box/location pair.
+  const [bulkEditContainerId, setBulkEditContainerId] = useState(''); // prefilled shared id ('' when none/various)
+  const [bulkEditContainerTouched, setBulkEditContainerTouched] = useState(false);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -148,24 +189,15 @@ const ItemListPage = () => {
   const navigate = useNavigate();
   const { activeDatabaseId } = useDatabases();
 
-  // Active box filter from URL (?boxId=...) — set by "View Items" on the Boxes page.
-  // The URL param is the single source of truth so deep links and back-button work correctly.
+  // Active container filter from URL (?containerId=...) — set by "View items" on
+  // the Containers page. The URL param is the single source of truth so deep
+  // links and back-button work correctly (mirrors the old boxFilterId pattern).
   const [searchParams, setSearchParams] = useSearchParams();
-  const boxFilterId = searchParams.get('boxId');
+  const containerFilterId = searchParams.get('containerId');
 
-  const clearBoxFilter = () => {
+  const clearContainerFilter = () => {
     const next = new URLSearchParams(searchParams);
-    next.delete('boxId');
-    setSearchParams(next);
-  };
-
-  // Active location filter from URL (?locationId=...) — set by "View Items" on the Locations page.
-  // Matches both loose items (direct location) and items inside boxes at that location.
-  const locationFilterId = searchParams.get('locationId');
-
-  const clearLocationFilter = () => {
-    const next = new URLSearchParams(searchParams);
-    next.delete('locationId');
+    next.delete('containerId');
     setSearchParams(next);
   };
 
@@ -184,33 +216,23 @@ const ItemListPage = () => {
     setSelectedItems(new Set());
     setAnchorItemId(null);
     setPage(0);
-    fetchBoxes();
+    fetchContainers();
     fetchItems();
-    fetchLocations();
     fetchTags();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeDatabaseId]);
 
-  // Reset pagination whenever the location, box, or tag filter changes or is cleared
+  // Reset pagination whenever the container or tag filter changes or is cleared
   useEffect(() => {
     setPage(0);
-  }, [locationFilterId, boxFilterId, tagFilterId]);
+  }, [containerFilterId, tagFilterId]);
 
-  const fetchBoxes = async () => {
+  const fetchContainers = async () => {
     try {
-      const response = await api.getBoxes();
-      if (response.success) setBoxes(response.data);
+      const response = await api.getContainers();
+      if (response.success) setContainers(response.data);
     } catch (err) {
-      console.error('Error fetching boxes:', err);
-    }
-  };
-
-  const fetchLocations = async () => {
-    try {
-      const response = await api.getLocations();
-      if (response.success) setLocations(response.data);
-    } catch (err) {
-      console.error('Error fetching locations:', err);
+      console.error('Error fetching containers:', err);
     }
   };
 
@@ -260,8 +282,8 @@ const ItemListPage = () => {
           ? new Date(a[field]) - new Date(b[field])
           : new Date(b[field]) - new Date(a[field]);
       } else {
-        aVal = String(getFixedColumnValue(a, field, locations, boxes) ?? '');
-        bVal = String(getFixedColumnValue(b, field, locations, boxes) ?? '');
+        aVal = String(getFixedColumnValue(a, field, containers) ?? '');
+        bVal = String(getFixedColumnValue(b, field, containers) ?? '');
       }
       if (aVal < bVal) return direction === 'asc' ? -1 : 1;
       if (aVal > bVal) return direction === 'asc' ? 1 : -1;
@@ -306,7 +328,8 @@ const ItemListPage = () => {
     if (criterion.field === 'tags') {
       fieldValue = (item.tags || []).map(t => t.name).join(', ');
     } else {
-      fieldValue = getFixedColumnValue(item, criterion.field, locations, boxes);
+      // The `container` field matches against the full display path.
+      fieldValue = getFixedColumnValue(item, criterion.field, containers);
     }
     const strValue = String(fieldValue ?? '').toLowerCase();
 
@@ -341,7 +364,7 @@ const ItemListPage = () => {
       if (!searchQuery.trim()) return true;
       const query = searchQuery.toLowerCase();
       const values = [
-        ...FIXED_COLUMNS.map(c => getFixedColumnValue(item, c.key, locations, boxes)),
+        ...FIXED_COLUMNS.map(c => getFixedColumnValue(item, c.key, containers)),
         (item.tags || []).map(t => t.name).join(', ')
       ];
       return values.some(val => String(val ?? '').toLowerCase().includes(query));
@@ -351,44 +374,29 @@ const ItemListPage = () => {
     return searchCriteria.every(criterion => matchesCriterion(item, criterion));
   };
 
-  // Pre-filter by active location from URL (?locationId=...) before search/sort/pagination.
-  // An item matches when its direct location OR the location of its box equals the filter,
-  // so both loose items and items inside boxes at that location are included.
-  const matchesLocationFilter = (item) => {
-    const target = String(locationFilterId);
-    const directRef = item.locationId;
-    const directId = directRef && typeof directRef === 'object' ? directRef._id : directRef;
-    if (directId && String(directId) === target) return true;
-    const boxLocRef = item.boxId?.locationId;
-    const boxLocId = boxLocRef && typeof boxLocRef === 'object' ? boxLocRef._id : boxLocRef;
-    return !!(boxLocId && String(boxLocId) === target);
+  // Pre-filter by active container from URL (?containerId=...) before
+  // search/sort/pagination. An item matches when its container IS the filter or
+  // lives anywhere in its subtree — so "view items" on a parent shows everything
+  // nested under it (mirrors how the old location filter behaved).
+  const containerFilterIds = useMemo(() => {
+    if (!containerFilterId) return null;
+    return new Set([String(containerFilterId), ...collectDescendantIds(containers, containerFilterId)]);
+  }, [containers, containerFilterId]);
+
+  const matchesContainerFilter = (item) => {
+    const ref = item.containerId;
+    if (!ref || typeof ref !== 'object' || !ref._id) return false;
+    return containerFilterIds.has(String(ref._id));
   };
 
-  const locationFilteredItems = locationFilterId ? items.filter(matchesLocationFilter) : items;
+  const containerFilteredItems = containerFilterIds ? items.filter(matchesContainerFilter) : items;
 
-  // Pre-filter by active box from URL (?boxId=...) before search/sort/pagination.
-  // Items without a box are excluded when the filter is active.
-  const matchesBoxFilter = (item) => {
-    if (!item.boxId || !item.boxId._id) return false;
-    return String(item.boxId._id) === String(boxFilterId);
-  };
-
-  const boxFilteredItems = boxFilterId ? locationFilteredItems.filter(matchesBoxFilter) : locationFilteredItems;
-
-  // Label for the active filter chip (resolved from the boxes list)
-  const boxFilterLabel = useMemo(() => {
-    if (!boxFilterId) return '';
-    const match = boxes.find(b => String(b._id) === String(boxFilterId));
-    return match?.boxId || 'Unknown box';
-  }, [boxes, boxFilterId]);
-
-  // Label for the active location filter chip (resolved from the locations list)
-  const locationFilterLabel = useMemo(() => {
-    if (!locationFilterId) return '';
-    const match = locations.find(l => String(l._id) === String(locationFilterId));
-    if (!match) return 'Unknown location';
-    return match.subLocation ? `${match.name} — ${match.subLocation}` : match.name;
-  }, [locations, locationFilterId]);
+  // Label for the active container filter chip (the full display path).
+  const containerFilterLabel = useMemo(() => {
+    if (!containerFilterId) return '';
+    const match = containers.find(c => String(c._id) === String(containerFilterId));
+    return match?.displayPath || 'Unknown container';
+  }, [containers, containerFilterId]);
 
   // Pre-filter by active tag from URL (?tagId=...) before search/sort/pagination.
   // Items without the tag are excluded when the filter is active.
@@ -396,7 +404,7 @@ const ItemListPage = () => {
     return (item.tags || []).some(t => String(t._id ?? t) === String(tagFilterId));
   };
 
-  const tagFilteredItems = tagFilterId ? boxFilteredItems.filter(matchesTagFilter) : boxFilteredItems;
+  const tagFilteredItems = tagFilterId ? containerFilteredItems.filter(matchesTagFilter) : containerFilteredItems;
 
   // Label for the active tag filter chip (resolved from the tags list)
   const tagFilterLabel = useMemo(() => {
@@ -410,17 +418,8 @@ const ItemListPage = () => {
   // ---- Bulk Edit Logic ----
   const selectedItemsList = items.filter(item => selectedItems.has(item._id));
 
-  // Display label for a box option: "A06 — Garage — Shelf 43" or just the ID
-  const getBulkBoxLabel = (box) => {
-    if (!box) return '';
-    return `${box.boxId || '(no ID)'}${box.locationDisplayLabel ? ` — ${box.locationDisplayLabel}` : ''}`;
-  };
-
-  // Display label for a location option: "Garage — Shelf 43" or just the name
-  const getBulkLocationLabel = (loc) => {
-    if (!loc) return '';
-    return loc.subLocation ? `${loc.name} — ${loc.subLocation}` : loc.name;
-  };
+  // Depth map for the bulk-edit container tree dropdown (indentation).
+  const containerDepthMap = useMemo(() => computeContainerDepthMap(containers), [containers]);
 
   // Count items per distinct value across the selection. Returns [] when all items
   // share one value; otherwise up to 4 entries plus a "+N more" tail.
@@ -443,22 +442,14 @@ const ItemListPage = () => {
   const formatDistribution = (entries) =>
     entries.map(e => e.label === 'more' ? `+${e.count} more` : `${e.count} ${e.label}`).join(', ');
 
-  // Distribution of values across the selection for fields that differ between items.
-  // Empty array means all selected items share one value (or nothing is selected).
-  const boxValueSummary = summarizeFieldValues(
-    item => String(item.boxId?._id || ''),
+  // Distribution of container assignments across the selection for items that differ.
+  // Empty array means all selected items share one container (or none).
+  const containerValueSummary = summarizeFieldValues(
+    item => String(item.containerId?._id || ''),
     key => {
-      if (!key) return 'unboxed';
-      const box = boxes.find(b => b._id === key);
-      return `in ${box ? getBulkBoxLabel(box) : '(unknown box)'}`;
-    }
-  );
-  const locationValueSummary = summarizeFieldValues(
-    item => String(item.locationId?._id || ''),
-    key => {
-      if (!key) return 'no direct location';
-      const loc = locations.find(l => l._id === key);
-      return loc ? getBulkLocationLabel(loc) : '(unknown location)';
+      if (!key) return 'unassigned';
+      const c = containers.find(x => String(x._id) === key);
+      return `in ${c ? (c.displayPath || c.name) : '(unknown container)'}`;
     }
   );
   const descriptionValueSummary = summarizeFieldValues(
@@ -494,20 +485,16 @@ const ItemListPage = () => {
   const openBulkEdit = () => {
     setBulkEditDescriptionChanged(false);
     setBulkEditTagsChanged(false);
-    setBulkEditBoxTouched(false);
-    setBulkEditLocationTouched(false);
+    setBulkEditContainerTouched(false);
 
     // Description: prefill when all items share the same description, else leave empty (various)
     const descriptions = new Set(selectedItemsList.map(item => String(item.description || '').trim()));
     setBulkEditDescription(descriptions.size === 1 ? descriptions.values().next().value : '');
 
-    // Box: prefill shared box id ('' when all unboxed or various — caption shows the distribution)
-    const boxIds = new Set(selectedItemsList.map(item => String(item.boxId?._id || '')));
-    setBulkEditBoxId(boxIds.size === 1 ? boxIds.values().next().value : '');
-
-    // Direct location: prefill shared direct location id ('' when all have none or various)
-    const locIds = new Set(selectedItemsList.map(item => String(item.locationId?._id || '')));
-    setBulkEditLocationId(locIds.size === 1 ? locIds.values().next().value : '');
+    // Container: prefill shared container id ('' when all unassigned or various —
+    // the caption shows the distribution)
+    const containerIds = new Set(selectedItemsList.map(item => String(item.containerId?._id || '')));
+    setBulkEditContainerId(containerIds.size === 1 ? containerIds.values().next().value : '');
 
     // Tags: reset to replace mode and prefill the shared tag set (or null = various).
     setBulkEditTagMode('replace');
@@ -521,35 +508,17 @@ const ItemListPage = () => {
     setBulkEditTagsChanged(true);
   };
 
-  // XOR: selecting a box clears the direct location (mirrors ItemEntryForm).
-  // The auto-cleared field is reset to untouched; backend XOR enforces the implied clear on save.
-  const handleBulkBoxChange = (newBoxId) => {
-    setBulkEditBoxId(newBoxId);
-    setBulkEditBoxTouched(true);
-    if (newBoxId) {
-      setBulkEditLocationId('');
-      setBulkEditLocationTouched(false);
-    }
+  // Single "move to container" control — no XOR clearing logic anymore.
+  const handleBulkContainerChange = (newContainerId) => {
+    setBulkEditContainerId(newContainerId);
+    setBulkEditContainerTouched(true);
   };
-
-  // XOR: selecting a direct location clears any box assignment (mirrors ItemEntryForm).
-  const handleBulkLocationChange = (newLocationId) => {
-    setBulkEditLocationId(newLocationId);
-    setBulkEditLocationTouched(true);
-    if (newLocationId) {
-      setBulkEditBoxId('');
-      setBulkEditBoxTouched(false);
-    }
-  };
-
-  // True when a specific box is selected for the bulk edit
-  const bulkBoxExplicitlySet = !!bulkEditBoxId;
 
   const handleBulkSave = async () => {
     try {
       setLoading(true);
 
-      // --- Update Item documents for description, tags, and box/location (XOR) ---
+      // --- Update Item documents for description, tags, and container ---
       const itemPromises = Array.from(selectedItems).map(async (itemId) => {
         const item = items.find(i => i._id === itemId);
         const payload = {};
@@ -568,15 +537,10 @@ const ItemListPage = () => {
             payload.tagNames = bulkEditTags.map(name => name.toLowerCase());
           }
         }
-        // Box/location: send explicitly when touched so clearing actually removes the reference.
-        // XOR mirrors ItemEntryForm: assigning a box clears any direct location, and vice versa.
-        if (bulkEditBoxTouched) {
-          payload.boxId = bulkEditBoxId || null;
-          if (bulkEditBoxId) payload.locationId = null;
-        }
-        if (bulkEditLocationTouched) {
-          payload.locationId = bulkEditLocationId || null;
-          if (bulkEditLocationId) payload.boxId = null;
+        // Container: send explicitly when touched so clearing actually removes the
+        // assignment. Only containerId is ever sent — never legacy boxId/locationId.
+        if (bulkEditContainerTouched) {
+          payload.containerId = bulkEditContainerId || null;
         }
         if (Object.keys(payload).length > 0) {
           await api.updateItem(itemId, payload);
@@ -700,13 +664,10 @@ const ItemListPage = () => {
         clearAll={clearSearchCriteria}
       />
 
-      {(locationFilterId || boxFilterId || tagFilterId) && (
+      {(containerFilterId || tagFilterId) && (
         <Box sx={{ mb: 2, display: 'flex', gap: 1 }}>
-          {locationFilterId && (
-            <Chip label={`Location: ${locationFilterLabel}`} color="success" onDelete={clearLocationFilter} />
-          )}
-          {boxFilterId && (
-            <Chip label={`Box: ${boxFilterLabel}`} color="primary" onDelete={clearBoxFilter} />
+          {containerFilterId && (
+            <Chip label={`Container: ${containerFilterLabel}`} color="primary" onDelete={clearContainerFilter} />
           )}
           {tagFilterId && (
             <Chip label={`Tag: ${tagFilterLabel}`} color="secondary" onDelete={clearTagFilter} />
@@ -780,13 +741,11 @@ const ItemListPage = () => {
             ) : sortedItems.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={totalColumns} align="center">
-                  {locationFilterId && !boxFilterId && !tagFilterId && locationFilteredItems.length === 0
-                    ? 'No items at this location.'
-                    : boxFilterId && !tagFilterId && boxFilteredItems.length === 0
-                      ? 'No items in this box.'
-                      : tagFilterId && !boxFilterId && tagFilteredItems.length === 0
-                        ? 'No items with this tag.'
-                        : 'No items found.'}
+                  {containerFilterId && !tagFilterId && containerFilteredItems.length === 0
+                    ? 'No items in this container.'
+                    : tagFilterId && !containerFilterId && tagFilteredItems.length === 0
+                      ? 'No items with this tag.'
+                      : 'No items found.'}
                 </TableCell>
               </TableRow>
             ) : (
@@ -798,22 +757,29 @@ const ItemListPage = () => {
                       onClick={(e) => handleSelectItem(item._id, e)}
                     />
                   </TableCell>
-                  {FIXED_COLUMNS.map(col => (
-                    <TableCell key={col.key}>
-                      {col.key === 'boxId' && item.boxId?._id ? (
-                        // Box ID is a link to the Boxes page filtered to this box.
-                        <Typography
-                          component="span"
-                          sx={{ color: 'primary.main', cursor: 'pointer' }}
-                          onClick={() => navigate(`/boxes?boxId=${item.boxId._id}`)}
-                        >
-                          {getBoxIdValue(item, boxes) || '(no ID)'}
-                        </Typography>
-                      ) : (
-                        getFixedColumnValue(item, col.key, locations, boxes) || '-'
-                      )}
-                    </TableCell>
-                  ))}
+                  {FIXED_COLUMNS.map(col => {
+                    // containerId arrives populated ({ _id, name, ... }) or as a raw id.
+                    const containerRef = typeof item.containerId === 'object' && item.containerId
+                      ? item.containerId._id
+                      : item.containerId;
+                    return (
+                      <TableCell key={col.key}>
+                        {col.key === 'container' && containerRef ? (
+                          // The display path is a link to the Containers page filtered
+                          // to this container (mirrors the old box-link pattern).
+                          <Typography
+                            component="span"
+                            sx={{ color: 'primary.main', cursor: 'pointer' }}
+                            onClick={() => navigate(`/containers?containerId=${containerRef}`)}
+                          >
+                            {getContainerPath(item, containers) || '(unknown container)'}
+                          </Typography>
+                        ) : (
+                          getFixedColumnValue(item, col.key, containers) || '-'
+                        )}
+                      </TableCell>
+                    );
+                  })}
                   {/* Tags */}
                   <TableCell>
                     {(item.tags || []).map(tag => (
@@ -969,86 +935,48 @@ const ItemListPage = () => {
 
           <Divider sx={{ my: 2 }} />
 
-          {/* Box selector */}
+          {/* Move to container — single tree dropdown replacing the old box/location pair */}
           <Box sx={{ mb: 2 }}>
-            {boxValueSummary.length > 0 && !bulkEditBoxTouched && (
+            {containerValueSummary.length > 0 && !bulkEditContainerTouched && (
               <Typography variant="caption" color="warning.main" sx={{ display: 'block', mb: 1 }}>
-                Various — {formatDistribution(boxValueSummary)}
+                Various — {formatDistribution(containerValueSummary)}
               </Typography>
             )}
             <Autocomplete
-              options={boxes}
-              value={bulkEditBoxId ? boxes.find(b => b._id === bulkEditBoxId) || null : null}
-              onChange={(e, newValue) => handleBulkBoxChange(newValue?._id || '')}
-              getOptionLabel={getBulkBoxLabel}
-              isOptionEqualToValue={(option, val) => option._id === val._id}
+              options={containers}
+              value={bulkEditContainerId ? containers.find(c => String(c._id) === bulkEditContainerId) || null : null}
+              onChange={(e, newValue) => handleBulkContainerChange(newValue?._id || '')}
+              getOptionLabel={(c) => (c ? c.displayPath || c.name : '')}
+              isOptionEqualToValue={(option, val) => option && val && String(option._id) === String(val._id)}
               filterOptions={(options, params) => {
                 const query = (params.inputValue || '').trim().toLowerCase();
                 if (!query) return options;
-                return options.filter(box => getBulkBoxLabel(box).toLowerCase().includes(query));
+                return options.filter(c => (c.displayPath || c.name).toLowerCase().includes(query));
               }}
-              noOptionsText="No matching boxes"
+              noOptionsText="No matching containers"
+              renderOption={(props, option) => {
+                const { key, ...optionProps } = props;
+                return (
+                  <li key={key} {...optionProps}>
+                    <Typography variant="body2">
+                      {'\u00A0'.repeat((containerDepthMap.get(String(option._id)) || 0) * 2)}
+                      {option.kind === 'box' ? '▣ ' : ''}{option.name}
+                      {option.boxId ? ` (${option.boxId})` : ''}
+                    </Typography>
+                  </li>
+                );
+              }}
               renderInput={(params) => (
                 <TextField
                   {...params}
-                  label="Assign Box"
-                  placeholder={boxValueSummary.length > 0 && !bulkEditBoxTouched ? 'Various — type to search or select a box...' : 'Type to search or select a box...'}
-                  helperText="Selecting a box clears any direct location. Clear the field to remove boxes."
-                  sx={{ backgroundColor: bulkEditBoxTouched ? '#c8e6c9' : (boxValueSummary.length > 0 ? '#fff3e0' : 'inherit'), borderRadius: 1 }}
+                  label="Move to Container"
+                  placeholder={containerValueSummary.length > 0 && !bulkEditContainerTouched ? 'Various — type to search or select a container...' : 'Type to search or select a container...'}
+                  helperText="Clear the field to remove items from their current container."
+                  sx={{ backgroundColor: bulkEditContainerTouched ? '#c8e6c9' : (containerValueSummary.length > 0 ? '#fff3e0' : 'inherit'), borderRadius: 1 }}
                 />
               )}
             />
           </Box>
-
-          {/* Direct Location Selection (when no box explicitly selected) */}
-          {!bulkBoxExplicitlySet && locations.length > 0 && (
-            <Box sx={{ mb: 2 }}>
-              {locationValueSummary.length > 0 && !bulkEditLocationTouched && (
-                <Typography variant="caption" color="warning.main" sx={{ display: 'block', mb: 1 }}>
-                  Various — {formatDistribution(locationValueSummary)}
-                </Typography>
-              )}
-              <Autocomplete
-                options={locations}
-                value={bulkEditLocationId ? locations.find(l => l._id === bulkEditLocationId) || null : null}
-                onChange={(e, newValue) => handleBulkLocationChange(newValue?._id || '')}
-                getOptionLabel={getBulkLocationLabel}
-                isOptionEqualToValue={(option, val) => option._id === val._id}
-                filterOptions={(options, params) => {
-                  const query = (params.inputValue || '').trim().toLowerCase();
-                  if (!query) return options;
-                  return options.filter(loc => getBulkLocationLabel(loc).toLowerCase().includes(query));
-                }}
-                noOptionsText="No matching locations"
-                renderInput={(params) => (
-                  <TextField
-                    {...params}
-                    label="Location (direct)"
-                    placeholder={locationValueSummary.length > 0 && !bulkEditLocationTouched ? 'Various — type to search or select a location...' : 'Type to search or select a location...'}
-                    helperText="Selecting a direct location clears any box assignment."
-                    sx={{ backgroundColor: bulkEditLocationTouched ? '#c8e6c9' : (locationValueSummary.length > 0 ? '#fff3e0' : 'inherit'), borderRadius: 1 }}
-                  />
-                )}
-              />
-            </Box>
-          )}
-
-          {/* Show inherited location when box is selected */}
-          {bulkBoxExplicitlySet && (
-            <Box sx={{ my: 1, p: 2, bgcolor: '#e1f5fe', borderRadius: 1 }}>
-              <Typography variant="caption" color="text.secondary" display="block" gutterBottom>
-                Location inherited from selected box:
-              </Typography>
-              {(() => {
-                const selectedBox = boxes.find(b => b._id === bulkEditBoxId);
-                return (
-                  <Typography variant="body2">
-                    <strong>Location:</strong> {selectedBox?.locationDisplayLabel || '—'}
-                  </Typography>
-                );
-              })()}
-            </Box>
-          )}
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setBulkEditOpen(false)}>Cancel</Button>
@@ -1056,7 +984,7 @@ const ItemListPage = () => {
             onClick={handleBulkSave}
             variant="contained"
             startIcon={<SaveIcon />}
-            disabled={!bulkEditDescriptionChanged && !bulkEditTagsChanged && !bulkEditBoxTouched && !bulkEditLocationTouched}
+            disabled={!bulkEditDescriptionChanged && !bulkEditTagsChanged && !bulkEditContainerTouched}
           >
             Save to {selectedItems.size} item(s)
           </Button>

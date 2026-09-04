@@ -67,54 +67,33 @@ export const api = {
   // Search items
   searchItems: async (query) => request(`/items/search/${query}`),
 
-  // --- Box API methods ---
+  // --- Container API methods (Stage 3 — replaces the old box/location APIs) ---
 
-  // Get all boxes (with item counts)
-  getBoxes: async () => request('/boxes'),
+  // Get all containers in the active database (flat list with computed
+  // displayPath, directItemCount and descendantCount; frontend builds the tree).
+  getContainers: async () => request('/containers'),
 
-  // Get box by ID (with items)
-  getBoxById: async (id) => request(`/boxes/${id}`),
+  // Get a single container + its subtree + direct items
+  getContainerById: async (id) => request(`/containers/${id}`),
 
-  // Create new box
-  createBox: async (boxData) =>
-    request('/boxes', {
+  // Create a container ({ name, kind, parentId?, boxId?, tags?/tagNames? })
+  createContainer: async (containerData) =>
+    request('/containers', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(boxData),
+      body: JSON.stringify(containerData),
     }),
 
-  // Update box
-  updateBox: async (id, boxData) =>
-    request(`/boxes/${id}`, {
+  // Rename and/or move a container ({ name?, parentId?, boxId? })
+  updateContainer: async (id, containerData) =>
+    request(`/containers/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(boxData),
+      body: JSON.stringify(containerData),
     }),
 
-  // Delete box
-  deleteBox: async (id) => request(`/boxes/${id}`, { method: 'DELETE' }),
-
-  // --- Location API methods ---
-
-  getLocations: async () => request('/locations'),
-
-  getLocationById: async (id) => request(`/locations/${id}`),
-
-  createLocation: async (locationData) =>
-    request('/locations', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(locationData),
-    }),
-
-  updateLocation: async (id, locationData) =>
-    request(`/locations/${id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(locationData),
-    }),
-
-  deleteLocation: async (id) => request(`/locations/${id}`, { method: 'DELETE' }),
+  // Delete a container (400 + { childCount, itemCount } while blocked)
+  deleteContainer: async (id) => request(`/containers/${id}`, { method: 'DELETE' }),
 
   // --- Tag API methods ---
 
