@@ -132,7 +132,7 @@ const validateAttributes = async (rawAttributes, databaseId, existingAttrs) => {
 
     const dimension = byName.get(key);
     if (!dimension) {
-      return { error: `Unknown attribute dimension "${key}". Define it first via POST /api/attributes.` };
+      return { error: `Unknown attribute "${key}". Define it first via POST /api/attributes.` };
     }
 
     const vocab = dimension.values || [];
@@ -141,14 +141,14 @@ const validateAttributes = async (rawAttributes, databaseId, existingAttrs) => {
 
     if (vocab.length > 0) {
       // Restricted dimension with an out-of-vocabulary value — unchanged from Stage 4.
-      return { error: `Invalid value "${value}" for attribute dimension "${key}". Allowed values: ${vocab.join(', ')}.` };
+      return { error: `Invalid value "${value}" for attribute "${key}". Allowed values: ${vocab.join(', ')}.` };
     }
 
     // Unrestricted dimension (empty vocabulary): free input, type-checked by
     // dataType. Values reaching here are non-empty (normalizeAttributesInput
     // drops blanks), so 'string'/'mixed' always pass; 'number' must parse.
     if ((dimension.dataType || 'string') === 'number' && Number.isNaN(Number(value))) {
-      return { error: `Invalid value "${value}" for attribute dimension "${key}": expected a number.` };
+      return { error: `Invalid value "${value}" for attribute "${key}": expected a number.` };
     }
   }
 

@@ -1081,7 +1081,7 @@ const ItemListPage = () => {
                   getOptionLabel={(d) => d?.name || ''}
                   isOptionEqualToValue={(option, val) => option && val && String(option._id) === String(val._id)}
                   renderInput={(params) => (
-                    <TextField {...params} label="Dimension" placeholder="(none)" helperText="Pick a dimension to set or clear its value on all selected items." />
+                    <TextField {...params} label="Attribute" placeholder="(none)" helperText="Pick an attribute to set or clear its value on all selected items." />
                   )}
                 />
                 {bulkEditAttributeDimId && (() => {
@@ -1117,7 +1117,7 @@ const ItemListPage = () => {
                         setBulkEditAttributeTouched(true);
                       }}
                       getOptionLabel={(v) => v}
-                      noOptionsText="No values defined for this dimension"
+                      noOptionsText="No values defined for this attribute"
                       renderInput={(params) => (
                         <TextField {...params} label="Value" placeholder="(clear)" helperText="Clear the field to remove this attribute from all selected items." />
                       )}

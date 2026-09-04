@@ -116,18 +116,18 @@ const createAttribute = async (req, res) => {
     const { name } = req.body;
 
     if (!name || !String(name).trim()) {
-      return res.status(400).json({ success: false, error: 'Attribute dimension name is required' });
+      return res.status(400).json({ success: false, error: 'Attribute name is required' });
     }
     const trimmedName = String(name).trim();
 
     // Dotted names would break item.attributes.<name> queries; reject early.
     if (trimmedName.includes('.') || trimmedName.startsWith('$')) {
-      return res.status(400).json({ success: false, error: 'Attribute dimension name cannot contain "." or start with "$"' });
+      return res.status(400).json({ success: false, error: 'Attribute name cannot contain "." or start with "$"' });
     }
 
     const existing = await findNameCollision(databaseId, trimmedName);
     if (existing) {
-      return res.status(400).json({ success: false, error: `An attribute dimension named "${existing.name}" already exists` });
+      return res.status(400).json({ success: false, error: `An attribute named "${existing.name}" already exists` });
     }
 
     let values = [];
@@ -161,16 +161,19 @@ const createAttribute = async (req, res) => {
   } catch (error) {
     console.error('[Attribute] Error creating attribute:', error.message);
     if (error.code === 11000) {
-      return res.status(400).json({ success: false, error: 'An attribute dimension with this name already exists' });
+      return res.status(400).json({ success: false, error: 'An attribute with this name already exists' });
     }
     res.status(400).json({ success: false, error: error.message });
   }
 };
 
-// @desc    Rename a dimension (rewrites the key on all affected items),
-//          replace its value list, and/or change dataType/unit. Renaming is
-//          blocked when it would collide with an existing dimension name in
-//          this database.
+// @desc    Update an attribute: rename (rewrites the key on all affected
+//          items), replace its value list, and/or change dataType/unit — any
+//          combination in one call (the edit dialog commits everything at once).
+//          Renaming is blocked when it would collide with an existing name in
+//          this database. Removing a value that items still use is allowed:
+//          those items keep their current value (grandfathered on item update);
+//          only new/changed values are restricted from then on.
 // @route   PUT /api/attributes/:id
 // @access  Public
 const updateAttribute = async (req, res) => {
@@ -179,7 +182,7 @@ const updateAttribute = async (req, res) => {
     const dimension = await findDimension(req.params.id, databaseId);
 
     if (!dimension) {
-      return res.status(404).json({ success: false, error: 'Attribute dimension not found' });
+      return res.status(404).json({ success: false, error: 'Attribute not found' });
     }
 
     // --- Rename (with item-key rewrite) -------------------------------------
@@ -187,31 +190,27 @@ const updateAttribute = async (req, res) => {
     if (req.body.name !== undefined && req.body.name !== null) {
       const trimmedName = String(req.body.name).trim();
       if (!trimmedName) {
-        return res.status(400).json({ success: false, error: 'Attribute dimension name cannot be empty' });
+        return res.status(400).json({ success: false, error: 'Attribute name cannot be empty' });
       }
       if (trimmedName.includes('.') || trimmedName.startsWith('$')) {
-        return res.status(400).json({ success: false, error: 'Attribute dimension name cannot contain "." or start with "$"' });
+        return res.status(400).json({ success: false, error: 'Attribute name cannot contain "." or start with "$"' });
       }
       const collision = await findNameCollision(databaseId, trimmedName, dimension._id);
       if (collision) {
-        return res.status(400).json({ success: false, error: `An attribute dimension named "${collision.name}" already exists` });
+        return res.status(400).json({ success: false, error: `An attribute named "${collision.name}" already exists` });
       }
       newName = trimmedName;
     }
 
     // --- Value list replacement ----------------------------------------------
+    // `values` is the COMPLETE desired list (the edit dialog sends its full
+    // local state), not an append. The pre-save hook trims/dedupes/empties.
     let newValues = dimension.values || [];
     if (req.body.values !== undefined && req.body.values !== null) {
       if (!Array.isArray(req.body.values)) {
         return res.status(400).json({ success: false, error: 'values must be an array of strings' });
       }
-      const seen = new Set();
-      for (const v of req.body.values) {
-        const s = String(v).trim();
-        if (!s || seen.has(s)) continue;
-        seen.add(s);
-        newValues.push(s);
-      }
+      newValues = req.body.values;
     }
 
     // --- dataType / unit (Stage 5 rev2) ---------------------------------------
@@ -253,7 +252,7 @@ const updateAttribute = async (req, res) => {
   } catch (error) {
     console.error('[Attribute] Error updating attribute:', error.message);
     if (error.code === 11000) {
-      return res.status(400).json({ success: false, error: 'An attribute dimension with this name already exists' });
+      return res.status(400).json({ success: false, error: 'An attribute with this name already exists' });
     }
     res.status(400).json({ success: false, error: error.message });
   }
@@ -268,7 +267,7 @@ const addValues = async (req, res) => {
     const doc = await Attribute.findOne({ _id: req.params.id, databaseId });
 
     if (!doc) {
-      return res.status(404).json({ success: false, error: 'Attribute dimension not found' });
+      return res.status(404).json({ success: false, error: 'Attribute not found' });
     }
 
     let values = [];
@@ -313,7 +312,7 @@ const removeValues = async (req, res) => {
     const doc = await Attribute.findOne({ _id: req.params.id, databaseId });
 
     if (!doc) {
-      return res.status(404).json({ success: false, error: 'Attribute dimension not found' });
+      return res.status(404).json({ success: false, error: 'Attribute not found' });
     }
 
     let values = [];
@@ -356,14 +355,14 @@ const deleteAttribute = async (req, res) => {
     const dimension = await findDimension(req.params.id, databaseId);
 
     if (!dimension) {
-      return res.status(404).json({ success: false, error: 'Attribute dimension not found' });
+      return res.status(404).json({ success: false, error: 'Attribute not found' });
     }
 
     const usage = await computeUsage(databaseId, dimension.name);
     if (usage.itemCount > 0) {
       return res.status(400).json({
         success: false,
-        error: `Cannot delete attribute dimension "${dimension.name}" — ${usage.itemCount} item(s) still use it. Clear the attribute from those items first.`,
+        error: `Cannot delete attribute "${dimension.name}" — ${usage.itemCount} item(s) still use it. Clear the attribute from those items first.`,
         data: { itemCount: usage.itemCount, valueCounts: usage.valueCounts }
       });
     }

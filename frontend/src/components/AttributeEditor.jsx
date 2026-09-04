@@ -104,13 +104,13 @@ const AttributeEditor = ({ availableDimensions, attributes, onChange }) => {
         }}
         getOptionLabel={(d) => d?.name || ''}
         isOptionEqualToValue={(option, val) => option && val && String(option.name) === String(val.name)}
-        noOptionsText="All available dimensions are already on this item"
+        noOptionsText="All available attributes are already on this item"
         renderInput={(params) => (
           <TextField
             {...params}
             label="Add attribute"
-            placeholder="(select a dimension)"
-            helperText="Pick any dimension from the database to add it to this item."
+            placeholder="(select an attribute)"
+            helperText="Pick any attribute from the database to add it to this item."
           />
         )}
       />
@@ -121,7 +121,7 @@ const AttributeEditor = ({ availableDimensions, attributes, onChange }) => {
   if (presentNames.length === 0 && pool.length === 0) {
     return (
       <Typography variant="body2" color="text.secondary">
-        No attribute dimensions are defined for this database.
+        No attributes are defined for this database.
       </Typography>
     );
   }
@@ -169,7 +169,7 @@ const AttributeEditor = ({ availableDimensions, attributes, onChange }) => {
                   onChange={(e, newValue) => updateValue(name, newValue)}
                   getOptionLabel={(option) => option}
                   isOptionEqualToValue={(option, val) => option === val}
-                  noOptionsText="No values defined for this dimension"
+                  noOptionsText="No values defined for this attribute"
                   renderInput={(params) => (
                     <TextField {...params} placeholder="(unset)" autoFocus={focusName === name} />
                   )}

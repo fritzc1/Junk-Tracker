@@ -80,18 +80,20 @@ const AttributeListPage = () => {
   const [newUnit, setNewUnit] = useState('');
   const [createError, setCreateError] = useState(null);
 
-  // Edit dialog state (rename + value list editing)
+  // Edit dialog state — Stage 5 rev4: single-commit model. All fields are local
+  // draft state; nothing is sent to the server until "Save Attribute" submits
+  // everything in one PUT (error -> shown + stay open; success -> close).
   const [editOpen, setEditOpen] = useState(false);
   const [editingDim, setEditingDim] = useState(null);
-  const [newName2, setNewName2] = useState('');
-  const [pendingValues, setPendingValues] = useState([]);
-  // Stage 5 rev2: data type + unit editing (saved via the Save button below).
+  const [editName, setEditName] = useState('');
+  const [editValues, setEditValues] = useState([]); // live chip list (local)
+  const [addValueInput, setAddValueInput] = useState('');
   const [editDataType, setEditDataType] = useState('string');
   const [editUnit, setEditUnit] = useState('');
   const [editError, setEditError] = useState(null);
-  const [renameNote, setRenameNote] = useState(null);
 
-  // Remove-value confirmation (usage-count warning before a blocked removal)
+  // Remove-value confirmation — deterministic notice that in-use values are
+  // removed from the allowed list while existing items keep their value.
   const [removeValueDialog, setRemoveValueDialog] = useState(null); // { value, count }
 
   // Delete-dimension confirmation
@@ -149,25 +151,25 @@ const AttributeListPage = () => {
         handleCloseCreate();
         fetchAttributes();
       } else {
-        setCreateError(response.error || 'Failed to create dimension');
+        setCreateError(response.error || 'Failed to create attribute');
       }
     } catch (err) {
-      setCreateError('Error creating dimension: ' + err.message);
+      setCreateError('Error creating attribute: ' + err.message);
     }
   };
 
-  // --- Edit dimension (rename + values) --------------------------------------
+  // --- Edit attribute (single-commit dialog, Stage 5 rev4) --------------------
 
   const handleOpenEdit = (dim) => {
     setEditingDim(dim);
-    setNewName2(dim.name);
-    setPendingValues([]);
-    // Stage 5 rev2: prefill data type + unit from the dimension (defaults for
-    // pre-existing documents without the fields).
+    setEditName(dim.name);
+    setEditValues([...(dim.values || [])]);
+    setAddValueInput('');
+    // Prefill data type + unit from the attribute (defaults for pre-existing
+    // documents without the fields).
     setEditDataType(dim.dataType || 'string');
     setEditUnit(dim.unit || '');
     setEditError(null);
-    setRenameNote(null);
     setEditOpen(true);
   };
 
@@ -175,94 +177,52 @@ const AttributeListPage = () => {
     setEditOpen(false);
     setEditingDim(null);
     setEditError(null);
-    setRenameNote(null);
   };
 
-  // Stage 5 rev2: save data type + unit (PUT with only those fields). The Save
-  // button is disabled while they match the dimension's current values.
-  const propertiesDirty = Boolean(editingDim) && (
+  // True when any draft field differs from the server's current values.
+  const editDirty = Boolean(editingDim) && (
+    editName.trim() !== editingDim.name ||
+    JSON.stringify([...editValues].sort()) !== JSON.stringify([...(editingDim.values || [])].sort()) ||
     editDataType !== (editingDim.dataType || 'string') ||
     editUnit !== (editingDim.unit || '')
   );
 
-  const handleSaveProperties = async () => {
-    if (!editingDim || !propertiesDirty) return;
+  // One PUT with the full draft: name + values (complete list) + dataType + unit.
+  const handleEditSubmit = async () => {
+    if (!editingDim || !editName.trim()) return;
     try {
-      const response = await api.updateAttribute(editingDim._id, { dataType: editDataType, unit: editUnit });
+      const response = await api.updateAttribute(editingDim._id, {
+        name: editName,
+        values: editValues,
+        dataType: editDataType,
+        unit: editUnit,
+      });
       if (response.success) {
-        setEditError(null);
-        fetchAttributes();
         handleCloseEdit();
-      } else {
-        setEditError(response.error || 'Failed to save data type / unit');
-      }
-    } catch (err) {
-      setEditError('Error saving data type / unit: ' + err.message);
-    }
-  };
-
-  // Rename: PUT with only the name. The server rewrites the key on every item
-  // that uses the dimension and reports itemsRewritten.
-  const handleRenameSave = async () => {
-    if (!editingDim || !newName2.trim()) return;
-    try {
-      const response = await api.updateAttribute(editingDim._id, { name: newName2 });
-      if (response.success) {
-        setNewName2(response.data.name);
-        const rewritten = response.data.itemsRewritten || 0;
-        setRenameNote(rewritten > 0 ? `Renamed — ${rewritten} item(s) updated.` : 'Renamed.');
-        setEditError(null);
         fetchAttributes();
       } else {
-        setEditError(response.error || 'Failed to rename dimension');
+        setEditError(response.error || 'Failed to save attribute');
       }
     } catch (err) {
-      setEditError('Error renaming dimension: ' + err.message);
+      setEditError('Error saving attribute: ' + err.message);
     }
   };
 
-  // Add values: POST the pending list; the server trims/dedupes and reports added.
-  const handleAddValues = async () => {
-    if (!editingDim || pendingValues.length === 0) return;
-    try {
-      const response = await api.addAttributeValues(editingDim._id, pendingValues);
-      if (response.success) {
-        setPendingValues([]);
-        setEditError(null);
-        fetchAttributes();
-      } else {
-        setEditError(response.error || 'Failed to add values');
-      }
-    } catch (err) {
-      setEditError('Error adding values: ' + err.message);
-    }
-  };
-
-  // Remove one value. In-use values get a deterministic confirmation first —
-  // removal is allowed and existing items keep their current value (Stage 5
-  // rev3); only new/changed values are restricted from now on.
+  // Remove one value from the local draft. In-use values get a deterministic
+  // confirmation first; either way removal only touches local state — the
+  // server sees it on Save (existing items keep their current value).
   const handleRemoveValueClick = (value) => {
     const count = editingDim?.valueCounts?.[value] || 0;
     if (count > 0) {
       setRemoveValueDialog({ value, count });
     } else {
-      doRemoveValue(value);
+      removeValueFromDraft(value);
     }
   };
 
-  const doRemoveValue = async (value) => {
-    try {
-      const response = await api.removeAttributeValues(editingDim._id, [value]);
-      if (!response.success) {
-        setEditError(response.error || 'Failed to remove value');
-      } else {
-        fetchAttributes();
-      }
-    } catch (err) {
-      setEditError('Error removing value: ' + err.message);
-    } finally {
-      setRemoveValueDialog(null);
-    }
+  const removeValueFromDraft = (value) => {
+    setEditValues(prev => prev.filter(v => v !== value));
+    setRemoveValueDialog(null);
   };
 
   // --- Delete dimension ------------------------------------------------------
@@ -280,10 +240,10 @@ const AttributeListPage = () => {
         fetchAttributes();
       } else {
         // Blocked by usage — surface the server's count-bearing message.
-        setDeleteError(response.error || 'Failed to delete dimension');
+        setDeleteError(response.error || 'Failed to delete attribute');
       }
     } catch (err) {
-      setDeleteError('Error deleting dimension: ' + err.message);
+      setDeleteError('Error deleting attribute: ' + err.message);
     }
   };
 
@@ -296,7 +256,7 @@ const AttributeListPage = () => {
           startIcon={<AddIcon />}
           onClick={handleOpenCreate}
         >
-          Add Dimension
+          Add Attribute
         </Button>
       </Box>
 
@@ -327,7 +287,7 @@ const AttributeListPage = () => {
             ) : dimensions.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={6} sx={{ textAlign: 'center' }}>
-                  No attribute dimensions defined for this database. Add one to classify items by footprint, tolerance, value, and so on.
+                  No attributes defined for this database. Add one to classify items by length, thread size, electrical value, and so on.
                 </TableCell>
               </TableRow>
             ) : (
@@ -358,12 +318,12 @@ const AttributeListPage = () => {
                   </TableCell>
                   <TableCell align="right">{dim.itemCount || 0}</TableCell>
                   <TableCell align="right">
-                    <Tooltip title="Edit Dimension">
+                    <Tooltip title="Edit Attribute">
                       <IconButton onClick={() => handleOpenEdit(dim)} size="small">
                         <EditIcon />
                       </IconButton>
                     </Tooltip>
-                    <Tooltip title="Delete Dimension">
+                    <Tooltip title="Delete Attribute">
                       <IconButton onClick={() => handleDeleteClick(dim)} size="small" color="error">
                         <DeleteIcon />
                       </IconButton>
@@ -376,20 +336,20 @@ const AttributeListPage = () => {
         </Table>
       </TableContainer>
 
-      {/* Create Dimension Dialog */}
+      {/* Create Attribute Dialog */}
       <Dialog open={createOpen} onClose={handleCloseCreate}>
-        <DialogTitle>Add New Dimension</DialogTitle>
+        <DialogTitle>Add New Attribute</DialogTitle>
         <DialogContent>
           {createError && (
             <Alert severity="error" sx={{ mb: 2 }}>{createError}</Alert>
           )}
           <TextField
-            label="Dimension Name"
+            label="Attribute Name"
             fullWidth
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
             margin="normal"
-            helperText='e.g., footprint, tolerance. Cannot contain "." or start with "$"; names are case-insensitive.'
+            helperText='e.g., length, thread size, resistance. Cannot contain "." or start with "$"; names are case-insensitive.'
             autoFocus
           />
           <Box sx={{ mt: 2 }}>
@@ -407,7 +367,7 @@ const AttributeListPage = () => {
                   {...params}
                   label="Allowed Values (optional)"
                   placeholder="Type a value and press Enter..."
-                  helperText="Optional list of values this dimension may take. Leave empty for free input."
+                  helperText="Optional list of values this attribute may take. Leave empty for free input."
                 />
               )}
             />
@@ -421,7 +381,7 @@ const AttributeListPage = () => {
             value={newDataType}
             onChange={(e) => setNewDataType(e.target.value)}
             margin="normal"
-            helperText='How free-input values are checked when this dimension has no values. "Number" requires a parseable number.'
+            helperText='How free-input values are checked when this attribute has no allowed values. "Number" requires a parseable number.'
           >
             {DATA_TYPE_OPTIONS.map(o => (
               <MenuItem key={o.value} value={o.value}>{o.label}</MenuItem>
@@ -448,44 +408,32 @@ const AttributeListPage = () => {
         <DialogActions>
           <Button onClick={handleCloseCreate}>Cancel</Button>
           <Button onClick={handleCreateSave} variant="contained" disabled={!newName.trim()}>
-            Add Dimension
+            Add Attribute
           </Button>
         </DialogActions>
       </Dialog>
 
-      {/* Edit Dimension Dialog — rename + value list editing */}
+      {/* Edit Attribute Dialog — Stage 5 rev4: single-commit. All fields are
+          local draft state; "Save Attribute" submits everything in one PUT,
+          shows the server's error and stays open on failure, closes on success. */}
       <Dialog open={editOpen} onClose={handleCloseEdit} maxWidth="sm" fullWidth>
-        <DialogTitle>Edit Dimension</DialogTitle>
+        <DialogTitle>Edit Attribute</DialogTitle>
         <DialogContent dividers>
           {editError && (
             <Alert severity="error" sx={{ mb: 2 }}>{editError}</Alert>
           )}
-          {renameNote && (
-            <Alert severity="success" sx={{ mb: 2 }}>{renameNote}</Alert>
-          )}
 
-          {/* Rename */}
-          <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-            <TextField
-              label="Dimension Name"
-              fullWidth
-              value={newName2}
-              onChange={(e) => setNewName2(e.target.value)}
-            />
-            <Button
-              variant="contained"
-              disabled={!newName2.trim() || newName2.trim() === editingDim?.name}
-              onClick={handleRenameSave}
-              sx={{ whiteSpace: 'nowrap' }}
-            >
-              Rename
-            </Button>
-          </Box>
-          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
-            Renaming rewrites the attribute key on every item that uses this dimension.
-          </Typography>
+          {/* Name */}
+          <TextField
+            label="Attribute Name"
+            fullWidth
+            value={editName}
+            onChange={(e) => setEditName(e.target.value)}
+            margin="normal"
+            helperText='Renaming rewrites the attribute key on every item that uses it.'
+          />
 
-          {/* Stage 5 rev2: data type + unit (saved via the Save button below) */}
+          {/* Data type + unit */}
           <Typography variant="subtitle2" sx={{ mt: 3, mb: 1 }}>Data Type & Unit</Typography>
           <TextField
             select
@@ -493,7 +441,7 @@ const AttributeListPage = () => {
             fullWidth
             value={editDataType}
             onChange={(e) => setEditDataType(e.target.value)}
-            helperText='How free-input values are checked when this dimension has no values. "Number" requires a parseable number.'
+            helperText='How free-input values are checked when this attribute has no allowed values. "Number" requires a parseable number.'
           >
             {DATA_TYPE_OPTIONS.map(o => (
               <MenuItem key={o.value} value={o.value}>{o.label}</MenuItem>
@@ -517,34 +465,39 @@ const AttributeListPage = () => {
             />
           </Box>
 
-          {/* Value list */}
-          <Typography variant="subtitle2" sx={{ mt: 3, mb: 1 }}>Values</Typography>
-          {editError === null && (editingDim?.values || []).length === 0 && (
+          {/* Allowed values — live local chips; add/remove only touch draft state */}
+          <Typography variant="subtitle2" sx={{ mt: 3, mb: 1 }}>Allowed Values</Typography>
+          {editValues.length === 0 && (
             <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-              No values defined yet.
+              No allowed values — items will use free input.
             </Typography>
           )}
           <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mb: 1 }}>
-            {(editingDim?.values || []).map(v => {
-              const count = editingDim?.valueCounts?.[v] || 0;
-              return (
-                <Chip
-                  key={v}
-                  size="small"
-                  label={count > 0 ? `${v} (${count})` : v}
-                  onDelete={() => handleRemoveValueClick(v)}
-                  deleteIcon={<DeleteIcon fontSize="inherit" />}
-                />
-              );
-            })}
+            {editValues.map(v => (
+              <Chip
+                key={v}
+                size="small"
+                label={v}
+                onDelete={() => handleRemoveValueClick(v)}
+                deleteIcon={<DeleteIcon fontSize="inherit" />}
+              />
+            ))}
           </Box>
           <Autocomplete
-            multiple
             freeSolo
             options={[]}
             getOptionLabel={(opt) => opt}
-            value={pendingValues}
-            onChange={(e, newValue) => setPendingValues(newValue || [])}
+            value={addValueInput}
+            onChange={(e, newValue) => setAddValueInput(newValue || '')}
+            onInputChange={(e, newValue) => setAddValueInput(newValue || '')}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                const v = addValueInput.trim();
+                if (v && !editValues.includes(v)) setEditValues(prev => [...prev, v]);
+                setAddValueInput('');
+              }
+            }}
             renderInput={(params) => (
               <TextField
                 {...params}
@@ -553,27 +506,16 @@ const AttributeListPage = () => {
               />
             )}
           />
-          {pendingValues.length > 0 && (
-            <Button size="small" variant="outlined" startIcon={<AddIcon />} onClick={handleAddValues} sx={{ mt: 1 }}>
-              Add {pendingValues.length} Value{pendingValues.length > 1 ? 's' : ''}
-            </Button>
-          )}
         </DialogContent>
         <DialogActions>
-          {/* Stage 5 rev2: persists data type + unit when changed (disabled otherwise). */}
-          <Button
-            variant="contained"
-            disabled={!propertiesDirty}
-            onClick={handleSaveProperties}
-            sx={{ mr: 'auto' }}
-          >
-            Save Data Type / Unit
+          <Button onClick={handleCloseEdit}>Cancel</Button>
+          <Button onClick={handleEditSubmit} variant="contained" disabled={!editName.trim() || !editDirty}>
+            Save Attribute
           </Button>
-          <Button onClick={handleCloseEdit}>Done</Button>
         </DialogActions>
       </Dialog>
 
-      {/* Remove-Value Confirmation — usage-count warning before a blocked removal */}
+      {/* Remove-Value Confirmation — deterministic notice for in-use values */}
       <Dialog open={Boolean(removeValueDialog)} onClose={() => setRemoveValueDialog(null)}>
         <DialogTitle>Remove Value</DialogTitle>
         <DialogContent>
@@ -586,7 +528,7 @@ const AttributeListPage = () => {
         <DialogActions>
           <Button onClick={() => setRemoveValueDialog(null)}>Cancel</Button>
           <Button
-            onClick={() => doRemoveValue(removeValueDialog?.value)}
+            onClick={() => removeValueFromDraft(removeValueDialog?.value)}
             variant="contained"
             color="warning"
           >
@@ -595,15 +537,15 @@ const AttributeListPage = () => {
         </DialogActions>
       </Dialog>
 
-      {/* Delete Dimension Confirmation */}
+      {/* Delete Attribute Confirmation */}
       <Dialog open={Boolean(deleteDim)} onClose={() => setDeleteDim(null)}>
-        <DialogTitle>Delete Dimension</DialogTitle>
+        <DialogTitle>Delete Attribute</DialogTitle>
         <DialogContent>
           {deleteError && (
             <Alert severity="error" sx={{ mb: 2 }}>{deleteError}</Alert>
           )}
           <DialogContentText>
-            Are you sure you want to delete dimension "{deleteDim?.name}"?
+            Are you sure you want to delete attribute "{deleteDim?.name}"?
             {(deleteDim?.itemCount || 0) > 0 ? (
               <> This will be blocked because {deleteDim.itemCount} item(s) still use it — clear the attribute from those items first.</>
             ) : (
