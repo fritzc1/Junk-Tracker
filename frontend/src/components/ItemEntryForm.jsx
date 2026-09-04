@@ -14,6 +14,7 @@ import { ArrowBack as ArrowBackIcon } from '@mui/icons-material';
 import { api } from '../services/api';
 import { useDatabases } from '../context/DatabaseContext';
 import TagSelector from './TagSelector';
+import AttributePickers from './AttributePickers';
 
 // Stage 3 of plans/container-tree-and-attributes-plan.md: the item form now uses
 // ONE container tree dropdown instead of the old box-selector + location-selector
@@ -49,6 +50,11 @@ const ItemEntryForm = ({ mode }) => {
   const [selectedContainerId, setSelectedContainerId] = useState('');
   const [containers, setContainers] = useState([]);
   const [tags, setTags] = useState([]);
+  // Stage 5: attribute dimensions for the active database + this item's values.
+  // The picker is parameterized — it renders one dropdown per dimension in the
+  // `dimensions` list (Stage 6 will pass a selected set's dimensions instead).
+  const [dimensions, setDimensions] = useState([]);
+  const [attributes, setAttributes] = useState({});
   const [loading, setLoading] = useState(mode === 'edit');
   const [error, setError] = useState(null);
 
@@ -56,7 +62,9 @@ const ItemEntryForm = ({ mode }) => {
   // mode a stale item ID from another database simply fails to load, which is
   // acceptable — users switch databases via the Databases page.
   useEffect(() => {
+    setAttributes({});
     fetchContainers();
+    fetchDimensions();
     if (mode === 'edit' && id) {
       fetchItem();
     }
@@ -72,8 +80,29 @@ const ItemEntryForm = ({ mode }) => {
     }
   };
 
+  // Load the active database's attribute dimensions (empty list → no pickers).
+  const fetchDimensions = async () => {
+    try {
+      const response = await api.getAttributes();
+      if (response.success) setDimensions(response.data || []);
+    } catch (err) {
+      console.error('Error fetching attributes:', err);
+    }
+  };
+
   // Indentation for the tree dropdown options.
   const depthMap = useMemo(() => computeDepthMap(containers), [containers]);
+
+  // Set/clear one dimension's value on this item (sparse map — unset keys are
+  // omitted so they never reach the server).
+  const handleAttributeChange = (name, value) => {
+    setAttributes(prev => {
+      const next = { ...prev };
+      if (value) next[name] = value;
+      else delete next[name];
+      return next;
+    });
+  };
 
   const fetchItem = async () => {
     try {
@@ -84,6 +113,8 @@ const ItemEntryForm = ({ mode }) => {
         // Single container reference — no XOR between two fields anymore.
         const ref = result.data.containerId;
         setSelectedContainerId(ref && typeof ref === 'object' ? String(ref._id) : (ref ? String(ref) : ''));
+        // Sparse attribute map: dimension name -> value.
+        setAttributes(result.data.attributes || {});
         // Set tags from populated data
         if (result.data.tags && Array.isArray(result.data.tags)) {
           setTags(result.data.tags.map(t => t.name));
@@ -103,21 +134,30 @@ const ItemEntryForm = ({ mode }) => {
 
     try {
       // Send ONLY containerId for the location reference — never legacy
-      // boxId/locationId keys, even as null/empty.
+      // boxId/locationId keys, even as null/empty. Attributes are sent only when
+      // at least one dimension is set (the server validates against the
+      // vocabulary and returns actionable 400 messages).
       const payload = {
         description,
         tagNames: tags,
         containerId: selectedContainerId || null,
       };
+      if (Object.keys(attributes).length > 0) {
+        payload.attributes = attributes;
+      }
 
-      if (mode === 'create') {
-        await api.createItem(payload);
-      } else {
-        await api.updateItem(id, payload);
+      // NOTE: api.js resolves — it does not throw — on HTTP 400 JSON bodies, so
+      // check `success` to surface the server's actionable error message.
+      const response = mode === 'create'
+        ? await api.createItem(payload)
+        : await api.updateItem(id, payload);
+      if (!response.success) {
+        setError(response.error || (mode === 'create' ? 'Error creating item' : 'Error updating item'));
+        return;
       }
       navigate('/items');
     } catch (error) {
-      setError(mode === 'create' ? 'Error creating item' : 'Error updating item');
+      setError(mode === 'create' ? 'Error creating item' : 'Error updating item: ' + error.message);
     }
   };
 
@@ -163,6 +203,14 @@ const ItemEntryForm = ({ mode }) => {
             <Box sx={{ mt: 2 }}>
               <TagSelector value={tags} onChange={setTags} />
             </Box>
+
+            {/* Attributes — one clearable dropdown per defined dimension. Renders
+                nothing when the database has no dimensions (zero overhead). */}
+            <AttributePickers
+              dimensions={dimensions}
+              values={attributes}
+              onChange={handleAttributeChange}
+            />
 
             {/* Container Selection — one tree dropdown for boxes and locations.
                 Options are indented by depth; boxes are visually distinguished

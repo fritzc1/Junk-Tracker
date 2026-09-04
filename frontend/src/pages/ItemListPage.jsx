@@ -50,8 +50,9 @@ const FIXED_COLUMNS = [
   { key: 'container', label: 'Container' },
 ];
 
-// Advanced search column options (fixed set)
-const SEARCH_COLUMN_OPTIONS = [
+// Advanced search column options — fixed columns + tags. Stage 5 appends one
+// option per defined attribute dimension (dynamic; see `searchColumnOptions`).
+const FIXED_SEARCH_COLUMN_OPTIONS = [
   ...FIXED_COLUMNS.map(c => ({ id: c.key, label: c.label })),
   { id: 'tags', label: 'Tags' },
 ];
@@ -90,6 +91,14 @@ const getFixedColumnValue = (item, key, containers) => {
     default:
       return '';
   }
+};
+
+// Stage 5: read one attribute value for an item. The sparse `attributes` map
+// arrives as a plain object in JSON responses; blank when the dimension is unset.
+const getAttributeValue = (item, name) => {
+  const attrs = item.attributes;
+  if (!attrs || typeof attrs !== 'object') return '';
+  return String(attrs[name] ?? '');
 };
 
 // Build a parentId -> children index over the flat container list.
@@ -180,6 +189,14 @@ const ItemListPage = () => {
   const [bulkEditContainerId, setBulkEditContainerId] = useState(''); // prefilled shared id ('' when none/various)
   const [bulkEditContainerTouched, setBulkEditContainerTouched] = useState(false);
 
+  // Stage 5: attribute dimensions for the active database (dynamic columns +
+  // bulk edit). Empty list → no attribute UI anywhere.
+  const [dimensions, setDimensions] = useState([]);
+  // Bulk edit: one dimension's value across all selected items ('' = clear).
+  const [bulkEditAttributeDimId, setBulkEditAttributeDimId] = useState('');
+  const [bulkEditAttributeValue, setBulkEditAttributeValue] = useState('');
+  const [bulkEditAttributeTouched, setBulkEditAttributeTouched] = useState(false);
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -219,6 +236,7 @@ const ItemListPage = () => {
     fetchContainers();
     fetchItems();
     fetchTags();
+    fetchAttributes();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeDatabaseId]);
 
@@ -242,6 +260,17 @@ const ItemListPage = () => {
       if (response.success) setTags(response.data);
     } catch (err) {
       console.error('Error fetching tags:', err);
+    }
+  };
+
+  // Stage 5: load the active database's attribute dimensions. A failed fetch
+  // just means no dynamic columns — it never blocks the item list itself.
+  const fetchAttributes = async () => {
+    try {
+      const response = await api.getAttributes();
+      if (response.success) setDimensions(response.data || []);
+    } catch (err) {
+      console.error('Error fetching attributes:', err);
     }
   };
 
@@ -277,6 +306,10 @@ const ItemListPage = () => {
       if (field === 'tags') {
         aVal = (a.tags || []).map(t => t.name).join(', ');
         bVal = (b.tags || []).map(t => t.name).join(', ');
+      } else if (field.startsWith('attribute:')) {
+        // Stage 5: sort on item.attributes.<name>; unset values sort first in asc.
+        aVal = getAttributeValue(a, field.slice('attribute:'.length));
+        bVal = getAttributeValue(b, field.slice('attribute:'.length));
       } else if (field === 'createdAt' || field === 'updatedAt') {
         return direction === 'asc'
           ? new Date(a[field]) - new Date(b[field])
@@ -316,7 +349,7 @@ const ItemListPage = () => {
   // Resolve the selected option object for a given criterion field ID
   const getSelectedColumnOption = (fieldId) => {
     if (!fieldId) return null;
-    return SEARCH_COLUMN_OPTIONS.find(o => o.id === fieldId) || null;
+    return searchColumnOptions.find(o => o.id === fieldId) || null;
   };
 
   // Advanced search: evaluate a single criterion against an item
@@ -327,6 +360,10 @@ const ItemListPage = () => {
     let fieldValue = '';
     if (criterion.field === 'tags') {
       fieldValue = (item.tags || []).map(t => t.name).join(', ');
+    } else if (criterion.field.startsWith('attribute:')) {
+      // Stage 5: match against item.attributes.<name> (blank when unset, so
+      // "Is empty" / "Not empty" work naturally).
+      fieldValue = getAttributeValue(item, criterion.field.slice('attribute:'.length));
     } else {
       // The `container` field matches against the full display path.
       fieldValue = getFixedColumnValue(item, criterion.field, containers);
@@ -365,6 +402,8 @@ const ItemListPage = () => {
       const query = searchQuery.toLowerCase();
       const values = [
         ...FIXED_COLUMNS.map(c => getFixedColumnValue(item, c.key, containers)),
+        // Stage 5: attribute values are searchable in basic mode too.
+        ...dimensions.map(d => getAttributeValue(item, d.name)),
         (item.tags || []).map(t => t.name).join(', ')
       ];
       return values.some(val => String(val ?? '').toLowerCase().includes(query));
@@ -414,6 +453,15 @@ const ItemListPage = () => {
   }, [tags, tagFilterId]);
 
   const filteredItems = tagFilteredItems.filter(applySearchFilter);
+
+  // Stage 5: advanced-search column options = fixed set + one per attribute dimension.
+  const searchColumnOptions = useMemo(
+    () => [
+      ...FIXED_SEARCH_COLUMN_OPTIONS,
+      ...dimensions.map(d => ({ id: `attribute:${d.name}`, label: `Attribute: ${d.name}` })),
+    ],
+    [dimensions]
+  );
 
   // ---- Bulk Edit Logic ----
   const selectedItemsList = items.filter(item => selectedItems.has(item._id));
@@ -496,6 +544,12 @@ const ItemListPage = () => {
     const containerIds = new Set(selectedItemsList.map(item => String(item.containerId?._id || '')));
     setBulkEditContainerId(containerIds.size === 1 ? containerIds.values().next().value : '');
 
+    // Stage 5 attributes: no prefill — the dimension picker starts empty and
+    // only applies when the user picks a dimension (and optionally a value).
+    setBulkEditAttributeDimId('');
+    setBulkEditAttributeValue('');
+    setBulkEditAttributeTouched(false);
+
     // Tags: reset to replace mode and prefill the shared tag set (or null = various).
     setBulkEditTagMode('replace');
     setBulkEditTags(getSharedTagPrefill());
@@ -542,8 +596,26 @@ const ItemListPage = () => {
         if (bulkEditContainerTouched) {
           payload.containerId = bulkEditContainerId || null;
         }
+        // Stage 5 attributes: replace the item's whole attribute map with its
+        // current values plus/minus this dimension, so other dimensions survive.
+        // '' clears the dimension (key omitted → server drops it). The server
+        // validates against the vocabulary and returns actionable 400 messages.
+        if (bulkEditAttributeTouched && bulkEditAttributeDimId) {
+          const dimName = dimensions.find(d => String(d._id) === bulkEditAttributeDimId)?.name;
+          if (dimName) {
+            const nextAttrs = { ...(item?.attributes || {}) };
+            if (bulkEditAttributeValue) nextAttrs[dimName] = bulkEditAttributeValue;
+            else delete nextAttrs[dimName];
+            payload.attributes = nextAttrs;
+          }
+        }
         if (Object.keys(payload).length > 0) {
-          await api.updateItem(itemId, payload);
+          // NOTE: api.js resolves — it does not throw — on HTTP 400 JSON bodies,
+          // so check `success` to surface the server's validation message.
+          const response = await api.updateItem(itemId, payload);
+          if (!response.success) {
+            throw new Error(response.error || 'Server rejected the update');
+          }
         }
       });
 
@@ -625,8 +697,9 @@ const ItemListPage = () => {
     navigate(`/edit/${itemId}`);
   };
 
-  // Total column count for colSpan: checkbox + fixed columns + tags + created + modified + actions
-  const totalColumns = 1 + FIXED_COLUMNS.length + 4;
+  // Total column count for colSpan: checkbox + fixed columns + attribute
+  // columns (Stage 5, dynamic) + tags + created + modified + actions
+  const totalColumns = 1 + FIXED_COLUMNS.length + dimensions.length + 4;
 
   return (
     <Container maxWidth="xl" sx={{ mt: 4, mb: 4 }}>
@@ -655,7 +728,7 @@ const ItemListPage = () => {
         placeholder="Search across all columns..."
         mode={searchMode}
         setMode={setSearchMode}
-        columnOptions={SEARCH_COLUMN_OPTIONS}
+        columnOptions={searchColumnOptions}
         getSelectedColumnOption={getSelectedColumnOption}
         searchCriteria={searchCriteria}
         addCriterion={addSearchCriterion}
@@ -701,6 +774,20 @@ const ItemListPage = () => {
                   <Box sx={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 0.5 }} onClick={() => handleSort(col.key)}>
                     <strong>{col.label}</strong>
                     {sortConfig.field === col.key && (
+                      sortConfig.direction === 'asc' ? <ArrowUpwardIcon fontSize="small" /> : <ArrowDownwardIcon fontSize="small" />
+                    )}
+                  </Box>
+                </TableCell>
+              ))}
+
+              {/* Stage 5: one dynamic column per defined attribute dimension,
+                  after the fixed columns. Sortable on item.attributes.<name>;
+                  renders nothing when the database has no dimensions. */}
+              {dimensions.map(dim => (
+                <TableCell key={`attribute:${dim.name}`}>
+                  <Box sx={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 0.5 }} onClick={() => handleSort(`attribute:${dim.name}`)}>
+                    <strong>{dim.name}</strong>
+                    {sortConfig.field === `attribute:${dim.name}` && (
                       sortConfig.direction === 'asc' ? <ArrowUpwardIcon fontSize="small" /> : <ArrowDownwardIcon fontSize="small" />
                     )}
                   </Box>
@@ -780,6 +867,12 @@ const ItemListPage = () => {
                       </TableCell>
                     );
                   })}
+                  {/* Stage 5: attribute values (empty cell when unset) */}
+                  {dimensions.map(dim => (
+                    <TableCell key={`attribute:${dim.name}`}>
+                      {getAttributeValue(item, dim.name)}
+                    </TableCell>
+                  ))}
                   {/* Tags */}
                   <TableCell>
                     {(item.tags || []).map(tag => (
@@ -900,6 +993,8 @@ const ItemListPage = () => {
                 Various — items have different tags. Setting new tags will replace all existing tags on selected items.
               </Typography>
             )}
+            {/* MUI v9 renders multiple-mode chips via the built-in chip slot —
+                the old renderTags prop no longer exists and leaks to the DOM. */}
             <Autocomplete
               multiple
               freeSolo
@@ -907,9 +1002,6 @@ const ItemListPage = () => {
               getOptionLabel={(opt) => typeof opt === 'string' ? opt : ''}
               value={bulkEditTags ?? []}
               onChange={handleBulkTagsChange}
-              renderTags={(value, getTagProps) =>
-                value.map((tag, i) => <Chip label={tag} {...getTagProps({ index: i })} key={i} />)
-              }
               renderInput={(params) => (
                 <TextField
                   {...params}
@@ -977,6 +1069,47 @@ const ItemListPage = () => {
               )}
             />
           </Box>
+
+          {dimensions.length > 0 && (
+            <>
+              <Divider sx={{ my: 2 }} />
+
+              {/* Stage 5 attributes — set/clear one dimension's value across all
+                  selected items. Validated server-side; 400 messages surface in the page alert. */}
+              <Box sx={{ mb: 2 }}>
+                <Typography variant="subtitle2" sx={{ mb: 1 }}>Attributes</Typography>
+                <Autocomplete
+                  options={dimensions}
+                  value={bulkEditAttributeDimId ? dimensions.find(d => String(d._id) === bulkEditAttributeDimId) || null : null}
+                  onChange={(e, newValue) => {
+                    setBulkEditAttributeDimId(newValue?._id || '');
+                    setBulkEditAttributeValue('');
+                    if (newValue) setBulkEditAttributeTouched(true);
+                  }}
+                  getOptionLabel={(d) => d?.name || ''}
+                  isOptionEqualToValue={(option, val) => option && val && String(option._id) === String(val._id)}
+                  renderInput={(params) => (
+                    <TextField {...params} label="Dimension" placeholder="(none)" helperText="Pick a dimension to set or clear its value on all selected items." />
+                  )}
+                />
+                {bulkEditAttributeDimId && (
+                  <Autocomplete
+                    options={dimensions.find(d => String(d._id) === bulkEditAttributeDimId)?.values || []}
+                    value={bulkEditAttributeValue}
+                    onChange={(e, newValue) => {
+                      setBulkEditAttributeValue(newValue || '');
+                      setBulkEditAttributeTouched(true);
+                    }}
+                    getOptionLabel={(v) => v}
+                    noOptionsText="No values defined for this dimension"
+                    renderInput={(params) => (
+                      <TextField {...params} label="Value" placeholder="(clear)" helperText="Clear the field to remove this attribute from all selected items." />
+                    )}
+                  />
+                )}
+              </Box>
+            </>
+          )}
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setBulkEditOpen(false)}>Cancel</Button>
@@ -984,7 +1117,7 @@ const ItemListPage = () => {
             onClick={handleBulkSave}
             variant="contained"
             startIcon={<SaveIcon />}
-            disabled={!bulkEditDescriptionChanged && !bulkEditTagsChanged && !bulkEditContainerTouched}
+            disabled={!bulkEditDescriptionChanged && !bulkEditTagsChanged && !bulkEditContainerTouched && !(bulkEditAttributeTouched && bulkEditAttributeDimId)}
           >
             Save to {selectedItems.size} item(s)
           </Button>

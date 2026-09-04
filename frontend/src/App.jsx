@@ -5,6 +5,7 @@ import ItemListPage from './pages/ItemListPage';
 import ItemEntryPage from './pages/ItemEntryPage';
 import ContainerListPage from './pages/ContainerListPage';
 import TagListPage from './pages/TagListPage';
+import AttributeListPage from './pages/AttributeListPage';
 import DatabasesPage from './pages/DatabasesPage';
 import SettingsPage from './pages/SettingsPage';
 import NavBar from './components/NavBar';
@@ -48,6 +49,8 @@ function App() {
               <Route path="/boxes" element={<Navigate to="/containers" replace />} />
               <Route path="/locations" element={<Navigate to="/containers" replace />} />
               <Route path="/tags" element={<TagListPage />} />
+              {/* Stage 5: attribute dimension management (per active database) */}
+              <Route path="/attributes" element={<AttributeListPage />} />
               <Route path="/databases" element={<DatabasesPage />} />
               <Route path="/settings" element={<SettingsPage />} />
             </Routes>

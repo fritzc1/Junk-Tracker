@@ -31,6 +31,8 @@ const SECTIONS = [
   // (which redirect to /containers) keep highlighting the right tab.
   { label: 'Containers', value: 'containers', paths: ['/containers', '/boxes', '/locations'] },
   { label: 'Tags', value: 'tags', paths: ['/tags'] },
+  // Stage 5: attribute dimension management page.
+  { label: 'Attributes', value: 'attributes', paths: ['/attributes'] },
   // Databases is reachable only via the active-database chip, not a tab.
   // It stays in SECTIONS so route resolution recognizes /databases (chip highlight).
   { label: 'Databases', value: 'databases', paths: ['/databases'], hidden: true },
@@ -41,6 +43,7 @@ const NAV_TARGETS = {
   items: '/',
   containers: '/containers',
   tags: '/tags',
+  attributes: '/attributes',
   settings: '/settings',
 };
 
