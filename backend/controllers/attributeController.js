@@ -298,9 +298,13 @@ const addValues = async (req, res) => {
   }
 };
 
-// @desc    Remove one or more values from a dimension's vocabulary. Blocked
-//          while any item still uses a value (the count is returned so the UI
-//          can explain why) — removing an in-use value would orphan data.
+// @desc    Remove one or more values from a dimension's vocabulary. NOT blocked
+//          while items use a value (owner decision, Stage 5 rev3): existing
+//          items keep their current value — it simply stops being an allowed
+//          option for new/changed values (item update grandfathering in
+//          itemController.validateAttributes keeps unchanged stale pairs valid).
+//          The response reports how many items are affected so the UI can say
+//          exactly what happened.
 // @route   DELETE /api/attributes/:id/values
 // @access  Public
 const removeValues = async (req, res) => {
@@ -326,23 +330,16 @@ const removeValues = async (req, res) => {
       return res.status(400).json({ success: false, error: 'No values to remove' });
     }
 
-    // Block while any item still uses a requested value.
+    // Report (do not block on) items that currently use a removed value — they
+    // keep their values; only new/changed values are restricted from now on.
     const usage = await computeUsage(databaseId, doc.name);
-    const inUse = requested.filter(v => (usage.valueCounts[v] || 0) > 0);
-    if (inUse.length > 0) {
-      const details = inUse.map(v => `"${v}" (${usage.valueCounts[v]} item(s))`).join(', ');
-      return res.status(400).json({
-        success: false,
-        error: `Cannot remove value(s) ${details} — items still use them. Clear the attribute from those items first.`,
-        data: { inUseCount: inUse.reduce((n, v) => n + usage.valueCounts[v], 0), valueCounts: Object.fromEntries(inUse.map(v => [v, usage.valueCounts[v]])) }
-      });
-    }
+    const affectedItems = requested.reduce((n, v) => n + (usage.valueCounts[v] || 0), 0);
 
     const current = new Set(doc.values || []);
     for (const v of requested) current.delete(v);
     doc.values = [...current];
     const saved = await doc.save();
-    res.status(200).json({ success: true, data: { ...saved.toObject(), removed: requested } });
+    res.status(200).json({ success: true, data: { ...saved.toObject(), removed: requested, affectedItems } });
   } catch (error) {
     console.error('[Attribute] Error removing values:', error.message);
     res.status(400).json({ success: false, error: error.message });

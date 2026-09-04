@@ -192,6 +192,7 @@ const AttributeListPage = () => {
       if (response.success) {
         setEditError(null);
         fetchAttributes();
+        handleCloseEdit();
       } else {
         setEditError(response.error || 'Failed to save data type / unit');
       }
@@ -237,8 +238,9 @@ const AttributeListPage = () => {
     }
   };
 
-  // Remove one value. In-use values get a usage-count warning first; the server
-  // still blocks with its own message if usage appeared in the meantime.
+  // Remove one value. In-use values get a deterministic confirmation first —
+  // removal is allowed and existing items keep their current value (Stage 5
+  // rev3); only new/changed values are restricted from now on.
   const handleRemoveValueClick = (value) => {
     const count = editingDim?.valueCounts?.[value] || 0;
     if (count > 0) {
@@ -403,9 +405,9 @@ const AttributeListPage = () => {
               renderInput={(params) => (
                 <TextField
                   {...params}
-                  label="Initial Values (optional)"
+                  label="Allowed Values (optional)"
                   placeholder="Type a value and press Enter..."
-                  helperText="The controlled vocabulary items may take for this dimension."
+                  helperText="Optional list of values this dimension may take. Leave empty for free input."
                 />
               )}
             />
@@ -494,7 +496,7 @@ const AttributeListPage = () => {
             helperText='How free-input values are checked when this dimension has no values. "Number" requires a parseable number.'
           >
             {DATA_TYPE_OPTIONS.map(o => (
-              <option key={o.value} value={o.value}>{o.label}</option>
+              <MenuItem key={o.value} value={o.value}>{o.label}</MenuItem>
             ))}
           </TextField>
           <Box sx={{ mt: 2 }}>
@@ -547,7 +549,7 @@ const AttributeListPage = () => {
               <TextField
                 {...params}
                 placeholder="Type a value and press Enter..."
-                helperText="Values in use cannot be removed until items stop using them."
+                helperText="Removing a value keeps it on existing items; new or changed values can no longer use it."
               />
             )}
           />
@@ -576,8 +578,9 @@ const AttributeListPage = () => {
         <DialogTitle>Remove Value</DialogTitle>
         <DialogContent>
           <DialogContentText>
-            Value "{removeValueDialog?.value}" is used by {removeValueDialog?.count} item(s). The
-            server will block the removal until those items are cleared — do you still want to try?
+            Value "{removeValueDialog?.value}" is currently used by {removeValueDialog?.count}{' '}
+            item(s). Removing it from the allowed values will NOT change those items — they keep
+            their current value. New or changed values can no longer use "{removeValueDialog?.value}".
           </DialogContentText>
         </DialogContent>
         <DialogActions>
@@ -585,9 +588,9 @@ const AttributeListPage = () => {
           <Button
             onClick={() => doRemoveValue(removeValueDialog?.value)}
             variant="contained"
-            color="error"
+            color="warning"
           >
-            Try to Remove
+            Remove Value
           </Button>
         </DialogActions>
       </Dialog>

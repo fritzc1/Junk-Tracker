@@ -109,14 +109,27 @@ const normalizeAttributesInput = (raw) => {
 
 // Validate a normalized attribute map against the database's dimensions.
 // Returns { error } on the first violation, or { attributes: Map|null }.
-const validateAttributes = async (rawAttributes, databaseId) => {
+//
+// Grandfathering (Stage 5 rev3): when `existingAttrs` is provided (item UPDATE),
+// a key/value pair that is byte-identical to what the item already stores skips
+// strict validation. This lets items keep values that were removed from a
+// dimension's vocabulary later — editing such an item for any other reason must
+// not 400; only NEW or CHANGED values are held to the current rules. Create
+// never passes existingAttrs, so new items are always strictly validated.
+const validateAttributes = async (rawAttributes, databaseId, existingAttrs) => {
   const attrs = normalizeAttributesInput(rawAttributes);
   if (Object.keys(attrs).length === 0) return { attributes: null }; // unchanged
 
   const dimensions = await Attribute.find({ databaseId }).lean();
   const byName = new Map(dimensions.map(d => [d.name, d]));
+  const existing = existingAttrs && typeof existingAttrs.toObject === 'function'
+    ? Object.fromEntries(existingAttrs)
+    : (existingAttrs || {});
 
   for (const [key, value] of Object.entries(attrs)) {
+    // Unchanged pair from the item's current state — keep it as-is.
+    if (Object.prototype.hasOwnProperty.call(existing, key) && String(existing[key]) === value) continue;
+
     const dimension = byName.get(key);
     if (!dimension) {
       return { error: `Unknown attribute dimension "${key}". Define it first via POST /api/attributes.` };
@@ -262,20 +275,23 @@ const updateItem = async (req, res) => {
       return res.status(400).json({ success: false, error: legacyErr });
     }
 
-    // Stage 4: attribute keys/values must match this database's dimensions.
-    // Only validated when the field is present so partial updates never touch
-    // an item's existing attributes.
-    let attrResult = null;
-    if (req.body.attributes !== undefined) {
-      attrResult = await validateAttributes(req.body.attributes, databaseId);
-      if (attrResult.error) {
-        return res.status(400).json({ success: false, error: attrResult.error });
-      }
-    }
-
+    // Fetch the current item first — its existing attribute map is needed for
+    // grandfathering (unchanged stale values stay valid on update).
     let item = await Item.findOne({ _id: req.params.id, databaseId });
     if (!item) {
       return res.status(404).json({ success: false, error: 'Item not found' });
+    }
+
+    // Stage 4 (relaxed in rev3): attribute keys/values must match this
+    // database's dimensions. Only validated when the field is present so
+    // partial updates never touch an item's existing attributes; unchanged
+    // key/value pairs are grandfathered through as-is.
+    let attrResult = null;
+    if (req.body.attributes !== undefined) {
+      attrResult = await validateAttributes(req.body.attributes, databaseId, item.attributes);
+      if (attrResult.error) {
+        return res.status(400).json({ success: false, error: attrResult.error });
+      }
     }
 
     // Handle description
