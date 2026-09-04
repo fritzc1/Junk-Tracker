@@ -450,7 +450,8 @@ async function printVerificationReport(db, plan) {
 
   // Orphan checks.
   const danglingItems = [];
-  for (const doc of db.collection('items').find({ containerId: { $ne: null } }, { projection: { _id: 1, containerId: 1 } })) {
+  const itemDocs = await db.collection('items').find({ containerId: { $ne: null } }, { projection: { _id: 1, containerId: 1 } }).toArray();
+  for (const doc of itemDocs) {
     if (!createdIds.has(String(doc.containerId))) danglingItems.push(shortId(doc._id));
   }
   const danglingParents = plan.containers.filter(c => c.parentId && !createdIds.has(String(c.parentId)));
