@@ -10,7 +10,7 @@
 
 | Stage | Name | Status |
 |-------|------|--------|
-| 1 | Container schema + data migration | ⬜ Not started |
+| 1 | Container schema + data migration | 🟡 In progress — model + script done, dry-run complete on real data; **pending owner approval before `--apply`** |
 | 2 | Container API + item reference cutover | ⬜ Not started |
 | 3 | Unified container UI + item page updates | ⬜ Not started |
 | 4 | Attribute system (backend) | ⬜ Not started |
@@ -86,7 +86,7 @@ erDiagram
 ## Stage 1 — Container schema + data migration (backend, highest risk)
 
 ### Step 1a: Create the Container model
-- [ ] Create `backend/models/Container.js`:
+- [x] Create `backend/models/Container.js`:
   - `databaseId` — ObjectId ref `Database`, required (per-database scoping like all entities).
   - `name` — String, required, trim. **No global uniqueness** (siblings may share names under different parents; e.g., "Shelf 43" in Garage and in Theater).
   - `kind` — String enum `['location', 'box']`, default `'location'`.
@@ -94,26 +94,26 @@ erDiagram
   - `boxId` — String, trim (only meaningful when `kind='box'`).
   - `tags` — array of ObjectId refs `Tag` (boxes currently carry tags; locations don't yet but may).
   - `createdAt` / `updatedAt` timestamps + pre-save hook.
-- [ ] Indexes:
+- [x] Indexes:
   - Partial unique index on `(databaseId, boxId)` with case-insensitive collation (`strength: 2`) and `partialFilterExpression: { kind: 'box', boxId: { $type: 'string' }, ... }` — mirrors the existing Box model's index pattern in [backend/models/Box.js](../backend/models/Box.js) (multiple ID-less boxes allowed).
   - Index on `(databaseId, parentId)` for tree queries.
-- [ ] Cycle guard: pre-save hook that walks up from `parentId` and rejects if `_id` appears among ancestors (defense-in-depth; the controller also checks on move).
-- [ ] Register model in `backend/server.js` alongside existing models; add index bootstrap next to the existing location-index migration block.
+- [x] Cycle guard: pre-save hook that walks up from `parentId` and rejects if `_id` appears among ancestors (defense-in-depth; the controller also checks on move).
+- [x] Register model in `backend/server.js` alongside existing models; add index bootstrap next to the existing location-index migration block.
 
 ### Step 1b: Migration script
-- [ ] Create `backend/scripts/migrate-containers.js`, run as a one-off CLI (`node scripts/migrate-containers.js --dry-run | --apply`).
+- [x] Create `backend/scripts/migrate-containers.js`, run as a one-off CLI (`node scripts/migrate-containers.js --dry-run | --apply`).
 - [ ] **Backup first:** dump current `locations`, `boxes`, `items` collections to JSON files under `backups/<timestamp>/` (and/or copy to `*_backup_<ts>` collections). Keep until Stage 7.
-- [ ] Mapping logic:
+- [x] Mapping logic:
   - Each Location with empty `subLocation` → one container (`kind='location'`).
   - Each Location with non-empty `subLocation` → parent container (`name`) + child container (`subLocation` as its own name, `parentId` = parent). Record old `_id` → **child** container id (items/boxes pointed at the specific shelf).
   - Each Box → container `kind='box'`, `boxId` preserved, `name` = boxId if non-empty else generated `"Box <short-id>"`, `tags` copied, `parentId` = mapped location container (null if the box had no location).
-- [ ] Item cutover: for every item set `containerId` from existing `boxId` or `locationId` (XOR guarantees at most one), then clear old refs.
-- [ ] **Dry-run mode** prints a full report without writing: counts of containers to create per kind, items to re-point, any anomalies (e.g., boxes referencing missing locations).
+- [x] Item cutover: for every item set `containerId` from existing `boxId` or `locationId` (XOR guarantees at most one), then clear old refs. *(logic implemented + computed in dry-run; the actual writes happen on `--apply`)*
+- [x] **Dry-run mode** prints a full report without writing: counts of containers to create per kind, items to re-point, any anomalies (e.g., boxes referencing missing locations). *(verified read-only against real data 2026-09-04; see Stage Status note)*
 - [ ] **Verification report on apply:** before/after counts, orphan check (no item with dangling `containerId`, no container with dangling `parentId`), sample path prints.
 - [ ] Idempotency: safe to re-run (detects already-migrated state via presence of `containers` collection + mapping marker document).
 
 ### Definition of Done — Stage 1
-- [ ] `Container` model exists with all fields/indexes above; app boots cleanly.
+- [x] `Container` model exists with all fields/indexes above; app boots cleanly. *(verified: clean boot on port 5099, container indexes synced)*
 - [ ] Migration dry-run on real data reviewed and approved by owner.
 - [ ] Migration applied; verification report shows zero orphans, counts match expectations.
 - [ ] Old `locations`/`boxes` collections still intact (no drop yet) — rollback = restore from backup + revert item refs.

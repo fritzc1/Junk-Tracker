@@ -117,6 +117,28 @@ async function ensureCaseInsensitiveBoxIndex() {
   );
 }
 
+// Ensure the Container indexes are in place (Stage 1): the partial
+// case-insensitive unique (databaseId, boxId) index for kind='box' docs and the
+// per-database tree-query compound index. Idempotent — createIndex is a no-op
+// when an identical index already exists. Must stay in sync with models/Container.js.
+async function ensureContainerIndexes() {
+  const collection = mongoose.connection.collection('containers');
+
+  await collection.createIndex(
+    { databaseId: 1, boxId: 1 },
+    {
+      unique: true,
+      collation: { locale: 'en', strength: 2 },
+      // ($gt instead of $ne — MongoDB partial filters don't support $ne)
+      partialFilterExpression: {
+        $and: [{ kind: 'box' }, { boxId: { $type: 'string' } }, { boxId: { $gt: '' } }]
+      }
+    }
+  );
+
+  await collection.createIndex({ databaseId: 1, parentId: 1 });
+}
+
 // One-time migration for multi-database support. Creates a "Default" database
 // only when no databases exist yet (true first run), backfills every existing
 // data document with its ID (so pre-existing data is preserved and visible),
@@ -193,6 +215,24 @@ async function migrateToMultiDatabase() {
   }
   await locations.createIndex({ databaseId: 1, name: 1, subLocation: 1 }, { unique: true });
 
+  // Container indexes (Stage 1): the partial case-insensitive unique boxId
+  // index and the tree-query compound index. Created here so a containers
+  // collection that predates the schema declaration still gets them; must stay
+  // in sync with models/Container.js and ensureContainerIndexes() below.
+  const containers = mongoose.connection.collection('containers');
+  await containers.createIndex(
+    { databaseId: 1, boxId: 1 },
+    {
+      unique: true,
+      collation: { locale: 'en', strength: 2 },
+      // ($gt instead of $ne — MongoDB partial filters don't support $ne)
+      partialFilterExpression: {
+        $and: [{ kind: 'box' }, { boxId: { $type: 'string' } }, { boxId: { $gt: '' } }]
+      }
+    }
+  );
+  await containers.createIndex({ databaseId: 1, parentId: 1 });
+
   const tags = mongoose.connection.collection('tags');
   try {
     const tagIndexes = await tags.indexes();
@@ -255,17 +295,23 @@ async function main() {
   const Location = require('./models/Location');
   const Tag = require('./models/Tag');
   const Database = require('./models/Database');
+  const Container = require('./models/Container');
   await Promise.all([
     Box.syncIndexes(),
     Item.syncIndexes(),
     Location.syncIndexes(),
     Tag.syncIndexes(),
-    Database.syncIndexes()
+    Database.syncIndexes(),
+    Container.syncIndexes()
   ]);
 
   // Final index check: guarantees the case-insensitive unique boxId index is in
   // place even on databases created before it was declared on the schema.
   await ensureCaseInsensitiveBoxIndex();
+
+  // Same guarantee for the Stage 1 container indexes (partial unique boxId +
+  // tree-query compound).
+  await ensureContainerIndexes();
 
   app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
