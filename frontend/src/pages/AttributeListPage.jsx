@@ -15,6 +15,7 @@ import {
   Typography,
   Alert,
   Chip,
+  MenuItem,
   Dialog,
   DialogActions,
   DialogContent,
@@ -38,6 +39,32 @@ import { useDatabases } from '../context/DatabaseContext';
 // messaging when the server blocks by usage. Layout/dialog conventions mirror
 // TagListPage. NOTE: api.js request() resolves — it does not throw — on HTTP 400
 // JSON bodies, so every call below checks `success` and surfaces `error`.
+//
+// Stage 5 rev2: dimensions carry a dataType (number/string/mixed) + optional
+// unit. Both are editable in the create/edit dialogs (Data type select + Unit
+// pick-or-type Autocomplete freeSolo seeded with common units) and shown as
+// their own table columns.
+
+// Common-unit seed options for the Unit field (freeSolo — any custom text works).
+const UNIT_OPTIONS = [
+  'Pound (lb)',
+  'Gram (g)',
+  'Ohm (Ω)',
+  'Farad (F)',
+  'Volt (V)',
+  'Ampere (A)',
+  'Watt (W)',
+  'Meter (m)',
+  'Millimeter (mm)',
+  'Inch (in)',
+];
+
+// Data type select options: stored value -> display label.
+const DATA_TYPE_OPTIONS = [
+  { value: 'string', label: 'String' },
+  { value: 'number', label: 'Number' },
+  { value: 'mixed', label: 'Mixed' },
+];
 
 const AttributeListPage = () => {
   const [dimensions, setDimensions] = useState([]);
@@ -48,6 +75,9 @@ const AttributeListPage = () => {
   const [createOpen, setCreateOpen] = useState(false);
   const [newName, setNewName] = useState('');
   const [newValues, setNewValues] = useState([]);
+  // Stage 5 rev2: data type + unit (defaults match the server's).
+  const [newDataType, setNewDataType] = useState('string');
+  const [newUnit, setNewUnit] = useState('');
   const [createError, setCreateError] = useState(null);
 
   // Edit dialog state (rename + value list editing)
@@ -55,6 +85,9 @@ const AttributeListPage = () => {
   const [editingDim, setEditingDim] = useState(null);
   const [newName2, setNewName2] = useState('');
   const [pendingValues, setPendingValues] = useState([]);
+  // Stage 5 rev2: data type + unit editing (saved via the Save button below).
+  const [editDataType, setEditDataType] = useState('string');
+  const [editUnit, setEditUnit] = useState('');
   const [editError, setEditError] = useState(null);
   const [renameNote, setRenameNote] = useState(null);
 
@@ -95,6 +128,9 @@ const AttributeListPage = () => {
   const handleOpenCreate = () => {
     setNewName('');
     setNewValues([]);
+    // Stage 5 rev2 defaults — match the server's (string / no unit).
+    setNewDataType('string');
+    setNewUnit('');
     setCreateError(null);
     setCreateOpen(true);
   };
@@ -107,7 +143,8 @@ const AttributeListPage = () => {
   const handleCreateSave = async () => {
     if (!newName.trim()) return;
     try {
-      const response = await api.createAttribute({ name: newName, values: newValues });
+      // Stage 5 rev2: dataType + unit travel with the create payload.
+      const response = await api.createAttribute({ name: newName, values: newValues, dataType: newDataType, unit: newUnit });
       if (response.success) {
         handleCloseCreate();
         fetchAttributes();
@@ -125,6 +162,10 @@ const AttributeListPage = () => {
     setEditingDim(dim);
     setNewName2(dim.name);
     setPendingValues([]);
+    // Stage 5 rev2: prefill data type + unit from the dimension (defaults for
+    // pre-existing documents without the fields).
+    setEditDataType(dim.dataType || 'string');
+    setEditUnit(dim.unit || '');
     setEditError(null);
     setRenameNote(null);
     setEditOpen(true);
@@ -135,6 +176,28 @@ const AttributeListPage = () => {
     setEditingDim(null);
     setEditError(null);
     setRenameNote(null);
+  };
+
+  // Stage 5 rev2: save data type + unit (PUT with only those fields). The Save
+  // button is disabled while they match the dimension's current values.
+  const propertiesDirty = Boolean(editingDim) && (
+    editDataType !== (editingDim.dataType || 'string') ||
+    editUnit !== (editingDim.unit || '')
+  );
+
+  const handleSaveProperties = async () => {
+    if (!editingDim || !propertiesDirty) return;
+    try {
+      const response = await api.updateAttribute(editingDim._id, { dataType: editDataType, unit: editUnit });
+      if (response.success) {
+        setEditError(null);
+        fetchAttributes();
+      } else {
+        setEditError(response.error || 'Failed to save data type / unit');
+      }
+    } catch (err) {
+      setEditError('Error saving data type / unit: ' + err.message);
+    }
   };
 
   // Rename: PUT with only the name. The server rewrites the key on every item
@@ -246,6 +309,9 @@ const AttributeListPage = () => {
           <TableHead>
             <TableRow>
               <TableCell><strong>Name</strong></TableCell>
+              {/* Stage 5 rev2: data type + unit columns */}
+              <TableCell><strong>Type</strong></TableCell>
+              <TableCell><strong>Unit</strong></TableCell>
               <TableCell><strong>Values (usage)</strong></TableCell>
               <TableCell align="right"><strong>Items</strong></TableCell>
               <TableCell align="right"><strong>Actions</strong></TableCell>
@@ -254,11 +320,11 @@ const AttributeListPage = () => {
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={4} sx={{ textAlign: 'center' }}>Loading...</TableCell>
+                <TableCell colSpan={6} sx={{ textAlign: 'center' }}>Loading...</TableCell>
               </TableRow>
             ) : dimensions.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={4} sx={{ textAlign: 'center' }}>
+                <TableCell colSpan={6} sx={{ textAlign: 'center' }}>
                   No attribute dimensions defined for this database. Add one to classify items by footprint, tolerance, value, and so on.
                 </TableCell>
               </TableRow>
@@ -266,6 +332,15 @@ const AttributeListPage = () => {
               dimensions.map(dim => (
                 <TableRow key={dim._id}>
                   <TableCell><strong>{dim.name}</strong></TableCell>
+                  {/* Stage 5 rev2: data type + unit (defaults for legacy docs) */}
+                  <TableCell>
+                    {(dim.dataType || 'string').charAt(0).toUpperCase() + (dim.dataType || 'string').slice(1)}
+                  </TableCell>
+                  <TableCell>
+                    {dim.unit ? dim.unit : (
+                      <Typography variant="body2" color="text.secondary">—</Typography>
+                    )}
+                  </TableCell>
                   <TableCell>
                     {(dim.values || []).map(v => {
                       const count = dim.valueCounts?.[v] || 0;
@@ -335,6 +410,38 @@ const AttributeListPage = () => {
               )}
             />
           </Box>
+
+          {/* Stage 5 rev2: data type + unit */}
+          <TextField
+            select
+            label="Data Type"
+            fullWidth
+            value={newDataType}
+            onChange={(e) => setNewDataType(e.target.value)}
+            margin="normal"
+            helperText='How free-input values are checked when this dimension has no values. "Number" requires a parseable number.'
+          >
+            {DATA_TYPE_OPTIONS.map(o => (
+              <MenuItem key={o.value} value={o.value}>{o.label}</MenuItem>
+            ))}
+          </TextField>
+          <Box sx={{ mt: 2 }}>
+            <Autocomplete
+              freeSolo
+              options={UNIT_OPTIONS}
+              getOptionLabel={(opt) => opt}
+              value={newUnit}
+              onChange={(e, newValue) => setNewUnit(newValue || '')}
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  label="Unit (optional)"
+                  placeholder="Pick or type a unit..."
+                  helperText='Shown after the value input on items. Leave empty for none.'
+                />
+              )}
+            />
+          </Box>
         </DialogContent>
         <DialogActions>
           <Button onClick={handleCloseCreate}>Cancel</Button>
@@ -375,6 +482,38 @@ const AttributeListPage = () => {
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
             Renaming rewrites the attribute key on every item that uses this dimension.
           </Typography>
+
+          {/* Stage 5 rev2: data type + unit (saved via the Save button below) */}
+          <Typography variant="subtitle2" sx={{ mt: 3, mb: 1 }}>Data Type & Unit</Typography>
+          <TextField
+            select
+            label="Data Type"
+            fullWidth
+            value={editDataType}
+            onChange={(e) => setEditDataType(e.target.value)}
+            helperText='How free-input values are checked when this dimension has no values. "Number" requires a parseable number.'
+          >
+            {DATA_TYPE_OPTIONS.map(o => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </TextField>
+          <Box sx={{ mt: 2 }}>
+            <Autocomplete
+              freeSolo
+              options={UNIT_OPTIONS}
+              getOptionLabel={(opt) => opt}
+              value={editUnit}
+              onChange={(e, newValue) => setEditUnit(newValue || '')}
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  label="Unit (optional)"
+                  placeholder="Pick or type a unit..."
+                  helperText='Shown after the value input on items. Leave empty for none.'
+                />
+              )}
+            />
+          </Box>
 
           {/* Value list */}
           <Typography variant="subtitle2" sx={{ mt: 3, mb: 1 }}>Values</Typography>
@@ -419,6 +558,15 @@ const AttributeListPage = () => {
           )}
         </DialogContent>
         <DialogActions>
+          {/* Stage 5 rev2: persists data type + unit when changed (disabled otherwise). */}
+          <Button
+            variant="contained"
+            disabled={!propertiesDirty}
+            onClick={handleSaveProperties}
+            sx={{ mr: 'auto' }}
+          >
+            Save Data Type / Unit
+          </Button>
           <Button onClick={handleCloseEdit}>Done</Button>
         </DialogActions>
       </Dialog>

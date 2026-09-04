@@ -32,6 +32,25 @@ const findNameCollision = async (databaseId, name, excludeId) => {
   }).lean();
 };
 
+// Stage 5 rev2: parse + validate the optional dataType/unit fields from a
+// request body. Returns { error } on bad input, else { dataType?, unit? } with
+// only the keys that were present (absent = leave unchanged). `dataType` must
+// be one of number/string/mixed; `unit` is trimmed to '' when blank.
+const parseDataTypeAndUnit = (body) => {
+  const out = {};
+  if (body.dataType !== undefined && body.dataType !== null) {
+    const dt = String(body.dataType).trim();
+    if (!['number', 'string', 'mixed'].includes(dt)) {
+      return { error: 'dataType must be one of "number", "string", or "mixed"' };
+    }
+    out.dataType = dt;
+  }
+  if (body.unit !== undefined && body.unit !== null) {
+    out.unit = String(body.unit).trim();
+  }
+  return out;
+};
+
 // Usage of one dimension across the active database's items: how many items
 // carry the key at all, plus a per-value breakdown. One aggregation pass over
 // the sparse map (items without the key simply do not match).
@@ -72,6 +91,9 @@ const getAttributes = async (req, res) => {
       _id: d._id,
       name: d.name,
       values: d.values || [],
+      // Stage 5 rev2: defaults for pre-existing documents without the fields.
+      dataType: d.dataType || 'string',
+      unit: d.unit || '',
       createdAt: d.createdAt,
       updatedAt: d.updatedAt,
       itemCount: usageByDim.get(d.name).itemCount,
@@ -122,7 +144,19 @@ const createAttribute = async (req, res) => {
       }
     }
 
-    const dimension = await Attribute.create({ databaseId, name: trimmedName, values });
+    // Stage 5 rev2: optional dataType + unit.
+    const typeFields = parseDataTypeAndUnit(req.body);
+    if (typeFields.error) {
+      return res.status(400).json({ success: false, error: typeFields.error });
+    }
+
+    const dimension = await Attribute.create({
+      databaseId,
+      name: trimmedName,
+      values,
+      ...(typeFields.dataType !== undefined ? { dataType: typeFields.dataType } : {}),
+      ...(typeFields.unit !== undefined ? { unit: typeFields.unit } : {})
+    });
     res.status(201).json({ success: true, data: dimension });
   } catch (error) {
     console.error('[Attribute] Error creating attribute:', error.message);
@@ -133,9 +167,10 @@ const createAttribute = async (req, res) => {
   }
 };
 
-// @desc    Rename a dimension (rewrites the key on all affected items) and/or
-//          replace its value list. Renaming is blocked when it would collide
-//          with an existing dimension name in this database.
+// @desc    Rename a dimension (rewrites the key on all affected items),
+//          replace its value list, and/or change dataType/unit. Renaming is
+//          blocked when it would collide with an existing dimension name in
+//          this database.
 // @route   PUT /api/attributes/:id
 // @access  Public
 const updateAttribute = async (req, res) => {
@@ -179,6 +214,12 @@ const updateAttribute = async (req, res) => {
       }
     }
 
+    // --- dataType / unit (Stage 5 rev2) ---------------------------------------
+    const typeFields = parseDataTypeAndUnit(req.body);
+    if (typeFields.error) {
+      return res.status(400).json({ success: false, error: typeFields.error });
+    }
+
     // --- Apply rename: rewrite the key on every item that uses it ------------
     let itemsRewritten = 0;
     if (newName !== dimension.name) {
@@ -203,6 +244,8 @@ const updateAttribute = async (req, res) => {
     if (req.body.values !== undefined && req.body.values !== null) {
       doc.values = newValues; // pre-save hook trims/dedupes/empties
     }
+    if (typeFields.dataType !== undefined) doc.dataType = typeFields.dataType;
+    if (typeFields.unit !== undefined) doc.unit = typeFields.unit;
     const saved = await doc.save();
 
     console.log(`[Attribute] Updated dimension "${dimension.name}" -> "${saved.name}" (${itemsRewritten} item(s) rewritten)`);

@@ -81,14 +81,16 @@ const resolveTagNames = async (tagNames, databaseId) => {
 };
 
 // ---------------------------------------------------------------------------
-// Attribute validation (Stage 4)
+// Attribute validation (Stage 4, relaxed in Stage 5 rev2)
 // ---------------------------------------------------------------------------
-// Items carry a sparse `attributes` map: dimension name -> vocabulary string.
-// The schema cannot enforce the vocabulary (it lives on the per-database
-// Attribute collection), so create/update validate at controller level: every
-// key must be a defined dimension for this database and its value must be in
-// that dimension's values[]. Items with no attributes / an empty map pass
-// through unchanged.
+// Items carry a sparse `attributes` map: dimension name -> value string. The
+// schema cannot enforce the vocabulary (it lives on the per-database Attribute
+// collection), so create/update validate at controller level: every key must
+// be a defined dimension for this database, and its value must either be in
+// that dimension's values[] (always OK) or — when the dimension has an empty
+// vocabulary (unrestricted) — pass the dataType check: 'number' dimensions
+// require Number(value) to parse; 'string'/'mixed' accept any non-empty text.
+// Items with no attributes / an empty map pass through unchanged.
 
 const normalizeAttributesInput = (raw) => {
   if (raw === undefined || raw === null) return {};
@@ -119,9 +121,21 @@ const validateAttributes = async (rawAttributes, databaseId) => {
     if (!dimension) {
       return { error: `Unknown attribute dimension "${key}". Define it first via POST /api/attributes.` };
     }
-    if (!(dimension.values || []).includes(value)) {
-      const allowed = (dimension.values || []).join(', ') || '(none defined yet)';
-      return { error: `Invalid value "${value}" for attribute dimension "${key}". Allowed values: ${allowed}.` };
+
+    const vocab = dimension.values || [];
+    // Vocabulary values are always valid, regardless of dataType.
+    if (vocab.includes(value)) continue;
+
+    if (vocab.length > 0) {
+      // Restricted dimension with an out-of-vocabulary value — unchanged from Stage 4.
+      return { error: `Invalid value "${value}" for attribute dimension "${key}". Allowed values: ${vocab.join(', ')}.` };
+    }
+
+    // Unrestricted dimension (empty vocabulary): free input, type-checked by
+    // dataType. Values reaching here are non-empty (normalizeAttributesInput
+    // drops blanks), so 'string'/'mixed' always pass; 'number' must parse.
+    if ((dimension.dataType || 'string') === 'number' && Number.isNaN(Number(value))) {
+      return { error: `Invalid value "${value}" for attribute dimension "${key}": expected a number.` };
     }
   }
 

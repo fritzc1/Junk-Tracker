@@ -286,3 +286,4 @@ Each deferred item has a tracking issue so it isn't lost:
 - Category trees / tag grouping hierarchies (D5) — [issue #2](https://github.com/fritzc1/Junk-Tracker/issues/2).
 - Stock/quantity tracking and in-out transactions (revisit if parts usage grows into real inventory management — at that point consider whether it belongs in this app or a dedicated one; no fork needed either way since multi-database isolates data) — [issue #3](https://github.com/fritzc1/Junk-Tracker/issues/3).
 - Saved-filter "virtual bins" (orthogonal feature; works over attributes + tags as-is when wanted) — [issue #4](https://github.com/fritzc1/Junk-Tracker/issues/4).
+- Number shape options for Number dimensions (decimal places, scientific notation, signed/unsigned) — [issue #18](https://github.com/fritzc1/Junk-Tracker/issues/18); the current attribute implementation stores numbers as free-form strings with no precision/format constraints.

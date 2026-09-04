@@ -1084,21 +1084,46 @@ const ItemListPage = () => {
                     <TextField {...params} label="Dimension" placeholder="(none)" helperText="Pick a dimension to set or clear its value on all selected items." />
                   )}
                 />
-                {bulkEditAttributeDimId && (
-                  <Autocomplete
-                    options={dimensions.find(d => String(d._id) === bulkEditAttributeDimId)?.values || []}
-                    value={bulkEditAttributeValue}
-                    onChange={(e, newValue) => {
-                      setBulkEditAttributeValue(newValue || '');
-                      setBulkEditAttributeTouched(true);
-                    }}
-                    getOptionLabel={(v) => v}
-                    noOptionsText="No values defined for this dimension"
-                    renderInput={(params) => (
-                      <TextField {...params} label="Value" placeholder="(clear)" helperText="Clear the field to remove this attribute from all selected items." />
-                    )}
-                  />
-                )}
+                {bulkEditAttributeDimId && (() => {
+                  // Stage 5 rev2: dimensions with an EMPTY values list get a plain
+                  // free-input TextField (type-aware helper text, same wording as
+                  // the item dialog) instead of a dropdown — so bulk editing works
+                  // for unrestricted dimensions too. Dimensions WITH values keep
+                  // the dropdown exactly as before. Server-side validation messages
+                  // still surface in the page alert either way.
+                  const dim = dimensions.find(d => String(d._id) === bulkEditAttributeDimId);
+                  const vocab = dim?.values || [];
+                  if (vocab.length === 0) {
+                    return (
+                      <TextField
+                        fullWidth
+                        label="Value"
+                        value={bulkEditAttributeValue}
+                        onChange={(e) => {
+                          setBulkEditAttributeValue(e.target.value);
+                          setBulkEditAttributeTouched(true);
+                        }}
+                        placeholder="(clear)"
+                        helperText={dim?.dataType === 'number' ? 'Enter a number (decimals allowed). Clear the field to remove this attribute from all selected items.' : 'Enter any value. Clear the field to remove this attribute from all selected items.'}
+                      />
+                    );
+                  }
+                  return (
+                    <Autocomplete
+                      options={vocab}
+                      value={bulkEditAttributeValue}
+                      onChange={(e, newValue) => {
+                        setBulkEditAttributeValue(newValue || '');
+                        setBulkEditAttributeTouched(true);
+                      }}
+                      getOptionLabel={(v) => v}
+                      noOptionsText="No values defined for this dimension"
+                      renderInput={(params) => (
+                        <TextField {...params} label="Value" placeholder="(clear)" helperText="Clear the field to remove this attribute from all selected items." />
+                      )}
+                    />
+                  );
+                })()}
               </Box>
             </>
           )}
