@@ -322,12 +322,19 @@ const app = express();
 
 // Middleware
 app.use(cors());
-app.use(express.json());
+// 5mb body limit: JSON snapshot imports (POST /api/items/import/json) carry a
+// full database — containers + items + tags — which easily exceeds the default
+// 100kb for anything but tiny databases. CSV/XLSX uploads go through multer and
+// are unaffected by this limit.
+app.use(express.json({ limit: '5mb' }));
 
 // Routes — all data routes are scoped to the active logical database, resolved
 // from the X-Database-Id header (see middleware/requireDatabase.js).
 app.use('/api/items', requireDatabase, require('./routes/items'));
 app.use('/api/tags', requireDatabase, require('./routes/tags'));
+// Stage 2: unified container API. The old /api/locations and /api/boxes routes
+// stay mounted until Stage 7 so the not-yet-updated frontend keeps working.
+app.use('/api/containers', requireDatabase, require('./routes/containers'));
 app.use('/api/locations', requireDatabase, require('./routes/locations'));
 app.use('/api/boxes', requireDatabase, require('./routes/boxes'));
 
@@ -335,7 +342,7 @@ app.use('/api/boxes', requireDatabase, require('./routes/boxes'));
 app.use('/api/databases', require('./routes/databases'));
 
 // @route   DELETE /api/data/clear-all
-// @desc    Wipe ALL data in the ACTIVE database (items, boxes, locations, tags, and any leftover customfields)
+// @desc    Wipe ALL data in the ACTIVE database (items, containers, boxes, locations, tags, and any leftover customfields)
 app.delete('/api/data/clear-all', requireDatabase, async (req, res) => {
   try {
     const db = mongoose.connection.db;
@@ -343,6 +350,9 @@ app.delete('/api/data/clear-all', requireDatabase, async (req, res) => {
     const databaseId = new mongoose.Types.ObjectId(req.databaseId);
     await Promise.all([
       db.collection('items').deleteMany({ databaseId }),
+      // Stage 2: containers are the live container store now (old boxes/locations
+      // docs stay until Stage 7 but are wiped too so a cleared database is empty).
+      db.collection('containers').deleteMany({ databaseId }),
       db.collection('boxes').deleteMany({ databaseId }),
       db.collection('locations').deleteMany({ databaseId }),
       db.collection('tags').deleteMany({ databaseId }),

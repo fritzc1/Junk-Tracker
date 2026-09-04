@@ -11,7 +11,7 @@
 | Stage | Name | Status |
 |-------|------|--------|
 | 1 | Container schema + data migration | ✅ Complete — applied 2026-09-04 (backup at `backend/backups/20260904-001557`); zero orphans, old collections intact |
-| 2 | Container API + item reference cutover | ⬜ Not started |
+| 2 | Container API + item reference cutover | ✅ Complete — verified 2026-09-04 (spare-port API tests on real data; JSON + CSV round-trips into temp databases, fully cleaned up); old `/api/locations` and `/api/boxes` still mounted until Stage 7 |
 | 3 | Unified container UI + item page updates | ⬜ Not started |
 | 4 | Attribute system (backend) | ⬜ Not started |
 | 5 | Attribute system (frontend) | ⬜ Not started |
@@ -123,42 +123,44 @@ erDiagram
 ## Stage 2 — Container API + item reference cutover (backend)
 
 ### Step 2a: Container controller + routes
-- [ ] Create `backend/controllers/containerController.js`:
+- [x] Create `backend/controllers/containerController.js`:
   - `getContainers` — flat list for the active database with computed fields: `displayPath` (e.g., `"Garage / Shelf 43"`), `directItemCount`, `descendantCount`. Frontend builds the tree from `parentId`.
   - `createContainer` — validate name; optional sibling-name duplicate **warning** (non-blocking) when a same-named container exists under the same parent.
   - `updateContainer` — rename and/or move (`parentId`). Move rules: reject self/cycle (walk ancestors), warn on sibling name collision, recompute nothing else (paths are computed at read time).
   - `deleteContainer` — block if it has child containers or direct items; return counts so the UI can explain why.
   - `getContainerById` — single container + its subtree + direct items (for detail view / "view contents").
-- [ ] Create `backend/routes/containers.js`; register in `backend/server.js`. Keep old `/api/locations` and `/api/boxes` routes mounted until Stage 7 so nothing breaks mid-migration.
+- [x] Create `backend/routes/containers.js`; register in `backend/server.js`. Keep old `/api/locations` and `/api/boxes` routes mounted until Stage 7 so nothing breaks mid-migration. *(verified: both old endpoints still respond on real data; tree helpers shared via `utils/containerTree.js`)*
 
 ### Step 2b: Item model + controller cutover, export/import formats
-- [ ] Update `backend/models/Item.js`: remove `boxId`, `locationId`, and the XOR pre-save hook; add `containerId` (ObjectId ref `Container`, nullable) with index.
-- [ ] Update `backend/controllers/itemController.js`:
+- [x] Update `backend/models/Item.js`: remove `boxId`, `locationId`, and the XOR pre-save hook; add `containerId` (ObjectId ref `Container`, nullable) with index. *(a toJSON/toObject transform preserves the computed `displayPath` in responses — Mongoose otherwise strips non-schema paths)*
+- [x] Update `backend/controllers/itemController.js`:
   - All populate chains: replace box/location populates with a single container populate that also fetches ancestor chain for `displayPath`.
   - Search haystack: include resolved container path + name.
 
 **Export/import — two formats, different jobs.** JSON is the **canonical lossless** format (backup, migration, moving data between databases); CSV/XLSX is a **flattened view for humans**. A flat spreadsheet cannot losslessly represent a nested tree or a sparse attribute map, so it must not be treated as the source of truth.
 
-- [ ] **JSON export** endpoint: full snapshot of the active database —
+- [x] **JSON export** endpoint (`GET /api/items/export/json`): full snapshot of the active database —
   - `version` (format version) + `exportedAt`.
   - `containers[]`: `_id`, `name`, `kind`, `parentId`, `boxId`, tags — the tree is fully reconstructable from `parentId`.
   - `items[]`: `_id`, `description`, raw `containerId` (not a path), full attribute map once Stage 4 lands, tag ids.
   - `tags[]` (+ attribute dimensions/sets once Stages 4–6 land).
   - **Round-trip guarantee:** importing an export into an empty database reproduces the data exactly — same tree, same references, same values.
-- [ ] **JSON import** endpoint: accepts a snapshot; creates entities preserving ids where possible (or remaps them consistently); reports conflicts/omissions instead of failing silently; tolerates missing sections from older format versions (e.g., no `attributes` before Stage 4).
-- [ ] **CSV/XLSX flattening rules** (`buildExportRow`) — for humans:
+- [x] **JSON import** endpoint (`POST /api/items/import/json`): accepts a snapshot; creates entities preserving ids where possible (or remaps them consistently); reports conflicts/omissions instead of failing silently; tolerates missing sections from older format versions (e.g., no `attributes` before Stage 4). *(verified: real-database export → fresh temp database round-trips with identical tree + item→container mapping; id preservation verified collision-free; timestamps restored via raw update to bypass the pre-save hook)*
+- [x] **CSV/XLSX flattening rules** (`buildExportRow`) — for humans:
   - One **Container** column = full display path (`Garage / Shelf 43`), replacing the separate Location / Sub-Location / Box ID columns.
   - Keep a raw `containerId` column so import can round-trip without re-resolving paths.
   - Tags → one comma-separated column.
   - Attribute dimensions (once Stage 4 lands) → one dynamic column per defined dimension, blank when unset; the row builder must already iterate over defined dimensions so this is a small change later.
-- [ ] **CSV/XLSX import** (`backend/routes/items.js`): container path column → create/find containers along the path (split on `/`, creating missing parents); box-id column → `kind='box'`; attribute columns map back to dimensions by header name; unknown headers are reported, not silently dropped.
+- [x] **CSV/XLSX import** (`backend/routes/items.js`): container path column → create/find containers along the path (split on `/`, creating missing parents); box-id column → `kind='box'`; attribute columns map back to dimensions by header name; unknown headers are reported, not silently dropped. *(raw `containerId` column round-trips without re-resolving paths; legacy Location/Sub-Location/Box ID files tolerated via the same tree-building logic — verified on real data)*
 - [ ] UI export buttons for both formats land with the item-page work in Stage 3b (backend endpoints exist from this step).
 
 ### Definition of Done — Stage 2
-- [ ] All container CRUD + move/cycle-check works via API against real data.
-- [ ] Items list/export/import work end-to-end with single `containerId`; no code path still reads `boxId`/`locationId`.
-- [ ] JSON export → import into a fresh database round-trips losslessly (verified on real data).
-- [ ] Old location/box endpoints still respond (for the not-yet-updated frontend).
+- [x] All container CRUD + move/cycle-check works via API against real data. *(61/61 spare-port checks passed: list counts, create/rename/move, cycle + self-parent rejection, delete guards with counts, search on path)*
+- [x] Items list/export/import work end-to-end with single `containerId`; no code path still reads `boxId`/`locationId`. *(grep-verified; legacy fields in item payloads are rejected with HTTP 400 rather than silently dropped — see orchestration decision below)*
+- [x] JSON export → import into a fresh database round-trips losslessly (verified on real data). *(134 containers + 575 items + 10 tags: identical path|kind|boxId and description||path||tags multisets; temp database deleted after verification)*
+- [x] Old location/box endpoints still respond (for the not-yet-updated frontend).
+
+**Orchestration decision (Stage 2b):** item create/update requests that carry a non-empty legacy `boxId` or `locationId` **and no `containerId`** are rejected with HTTP 400 ("Legacy fields … deprecated … use containerId"). Rationale: those fields no longer exist on the Item schema, so Mongoose strict mode would silently drop the assignment — a data-integrity risk while the old frontend (which still sends both keys) exists. Legacy keys sent as `null`/empty are tolerated (the old form always sends both), and an explicit `containerId` takes precedence over legacy fields. Enforced in `legacyFieldError()` in [backend/controllers/itemController.js](../backend/controllers/itemController.js).
 
 ---
 

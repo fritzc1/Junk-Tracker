@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 const Database = require('../models/Database');
 const Item = require('../models/Item');
+const Container = require('../models/Container');
 const Box = require('../models/Box');
 const Location = require('../models/Location');
 const Tag = require('../models/Tag');
@@ -106,7 +107,7 @@ const renameDatabase = async (req, res) => {
   }
 };
 
-// @desc    Delete a database and ALL of its data (items, boxes, locations, tags)
+// @desc    Delete a database and ALL of its data (items, containers, boxes, locations, tags)
 // @route   DELETE /api/databases/:id
 // @access  Public
 const deleteDatabase = async (req, res) => {
@@ -129,9 +130,12 @@ const deleteDatabase = async (req, res) => {
     // items in OTHER databases that reference them (tags are per-database).
     const ownTagIds = await Tag.find({ databaseId: db._id }).distinct('_id');
 
-    // Wipe all data for this database.
+    // Wipe all data for this database. Containers (Stage 2) are wiped too so no
+    // orphaned container docs survive the deletion; old boxes/locations stay in
+    // their collections until Stage 7 but are removed per-database here as well.
     await Promise.all([
       Item.deleteMany({ databaseId: db._id }),
+      Container.deleteMany({ databaseId: db._id }),
       Box.deleteMany({ databaseId: db._id }),
       Location.deleteMany({ databaseId: db._id }),
       Tag.deleteMany({ databaseId: db._id })
