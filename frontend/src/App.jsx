@@ -1,12 +1,9 @@
 import React from 'react';
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { ThemeProvider, createTheme, CssBaseline } from '@mui/material';
 import ItemListPage from './pages/ItemListPage';
 import ItemEntryPage from './pages/ItemEntryPage';
-import BoxListPage from './pages/BoxListPage';
-import BoxEntryPage from './pages/BoxEntryPage';
-import LocationListPage from './pages/LocationListPage';
-import LocationEntryPage from './pages/LocationEntryPage';
+import ContainerListPage from './pages/ContainerListPage';
 import TagListPage from './pages/TagListPage';
 import DatabasesPage from './pages/DatabasesPage';
 import SettingsPage from './pages/SettingsPage';
@@ -44,12 +41,12 @@ function App() {
               <Route path="/entry" element={<ItemEntryPage mode="create" />} />
               <Route path="/edit/:id" element={<ItemEntryPage mode="edit" />} />
               <Route path="/items" element={<ItemListPage />} />
-              <Route path="/boxes" element={<BoxListPage />} />
-              <Route path="/box-entry" element={<BoxEntryPage mode="create" />} />
-              <Route path="/box-edit/:id" element={<BoxEntryPage mode="edit" />} />
-              <Route path="/locations" element={<LocationListPage />} />
-              <Route path="/location-entry" element={<LocationEntryPage mode="create" />} />
-              <Route path="/location-edit/:id" element={<LocationEntryPage mode="edit" />} />
+              {/* Stage 3: unified container page. The old /boxes and /locations
+                  routes (and their entry/edit pages) redirect here — the dead
+                  Box/Location pages were removed in this stage. */}
+              <Route path="/containers" element={<ContainerListPage />} />
+              <Route path="/boxes" element={<Navigate to="/containers" replace />} />
+              <Route path="/locations" element={<Navigate to="/containers" replace />} />
               <Route path="/tags" element={<TagListPage />} />
               <Route path="/databases" element={<DatabasesPage />} />
               <Route path="/settings" element={<SettingsPage />} />

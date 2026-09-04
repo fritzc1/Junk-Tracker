@@ -12,7 +12,7 @@
 |-------|------|--------|
 | 1 | Container schema + data migration | ✅ Complete — applied 2026-09-04 (backup at `backend/backups/20260904-001557`); zero orphans, old collections intact |
 | 2 | Container API + item reference cutover | ✅ Complete — verified 2026-09-04 (spare-port API tests on real data; JSON + CSV round-trips into temp databases, fully cleaned up); old `/api/locations` and `/api/boxes` still mounted until Stage 7 |
-| 3 | Unified container UI + item page updates | ⬜ Not started |
+| 3 | Unified container UI + item page updates | ✅ Complete — verified 2026-09-04 (spare-port backend on 5099 + Vite dev server, real browser via Playwright: tree render/indentation, create/rename/move/delete incl. blocked-delete counts, ?containerId= highlight+chip, item Container column links, form tree picker end-to-end item save, bulk move; all test data cleaned up) |
 | 4 | Attribute system (backend) | ⬜ Not started |
 | 5 | Attribute system (frontend) | ⬜ Not started |
 | 6 | Attribute sets (type-scoped attribute profiles) | ⬜ Not started |
@@ -167,27 +167,27 @@ erDiagram
 ## Stage 3 — Unified container UI + item page updates (frontend)
 
 ### Step 3a: Container tree page (replaces Locations + Boxes pages)
-- [ ] Create `frontend/src/pages/ContainerListPage.jsx`:
-  - Indented/tree table of all containers in the active database, sorted by path; type badge or icon for `box` vs `location`.
-  - Columns: Name (indented by depth), Kind, Box ID (boxes only), Items count, Subtree size.
-  - Row actions: **New child**, **Rename/Move** (dialog with parent picker — tree dropdown excluding self and descendants), **View items**, **Delete** (with explanatory error when blocked).
-  - Search box filters by name/path; kind filter toggle (all / locations / boxes).
-- [ ] Support `?containerId=` URL param: highlight + scroll to that row, show a dismissible chip — mirroring the existing `boxFilterId` pattern in [frontend/src/pages/BoxListPage.jsx](../frontend/src/pages/BoxListPage.jsx).
-- [ ] Update `frontend/src/App.jsx`: route `/containers`; keep `/locations` and `/boxes` as redirects to `/containers`. Update `NavBar.jsx` (one "Containers" link replaces two).
-- [ ] Remove now-dead components: `NewLocationDialog.jsx`, `NewBoxDialog.jsx`, `LocationEntryForm.jsx` (replaced by the inline create/rename dialogs), `LocationListPage.jsx`, `BoxListPage.jsx`, `LocationEntryPage.jsx`, `BoxEntryPage.jsx`.
+- [x] Create `frontend/src/pages/ContainerListPage.jsx`:
+  - Indented/tree table of all containers in the active database, sorted by path; type badge or icon for `box` vs `location`. *(verified on real data: 134 containers render with depth indentation, Box/Location chips, e.g. "Garage / Shelf 43" with box children A07/A24…)*
+  - Columns: Name (indented by depth), Kind, Box ID (boxes only), Items count, Subtree size. *(verified: directItemCount + descendantCount from the API render correctly, e.g. Garage = 57 descendants)*
+  - Row actions: **New child**, **Rename/Move** (dialog with parent picker — tree dropdown excluding self and descendants), **View items**, **Delete** (with explanatory error when blocked). *(verified in browser: created "Stage3 Test Shelf" under Garage; renamed + moved it to Office via the dialog; delete of Garage blocked with the API's {childCount,itemCount} shown in-dialog)*
+  - Search box filters by name/path; kind filter toggle (all / locations / boxes). *(verified: search "Shelf 43" shows match + ancestor context; Boxes filter = all 95 boxes + 29 ancestor locations kept for tree context)*
+- [x] Support `?containerId=` URL param: highlight + scroll to that row, show a dismissible chip — mirroring the existing `boxFilterId` pattern in BoxListPage.jsx (now deleted). *(verified: deep link highlights + scrolls to the row and shows "Container: Garage / Shelf 43 / A07" chip; chip clears via X)*
+- [x] Update `frontend/src/App.jsx`: route `/containers`; keep `/locations` and `/boxes` as redirects to `/containers`. Update `NavBar.jsx` (one "Containers" link replaces two). *(verified: both old routes redirect in-browser; nav shows a single Containers tab, highlighted on /containers)*
+- [x] Remove now-dead components: `NewLocationDialog.jsx`, `NewBoxDialog.jsx`, `LocationEntryForm.jsx` (replaced by the inline create/rename dialogs), `LocationListPage.jsx`, `BoxListPage.jsx`, `LocationEntryPage.jsx`, `BoxEntryPage.jsx`. *(also removed `BoxEntryForm.jsx` — it was only used by BoxEntryPage/NewBoxDialog and called the now-removed box/location API functions; grep confirms zero remaining references)*
 
 ### Step 3b: Item pages use one container reference
-- [ ] `frontend/src/pages/ItemListPage.jsx`:
-  - Replace Location / Sub-Location / Box ID columns with a single **Container** column showing the display path; clickable → `/containers?containerId=<id>` (mirrors the existing box-link pattern).
-  - Update sort + advanced-search options accordingly (one `container` field matching against full path).
-  - Container filter chip from URL param, same as today's location/box chips.
-- [ ] `frontend/src/components/ItemEntryForm.jsx`: replace the box-selector + location-selector XOR pair with one **tree dropdown** (MUI Autocomplete over containers grouped by parent; boxes visually distinguished). Selecting a container sets `containerId`; no more clearing logic between two fields.
-- [ ] Bulk edit: single "move to container" control replacing separate box/location bulk controls.
+- [x] `frontend/src/pages/ItemListPage.jsx`:
+  - Replace Location / Sub-Location / Box ID columns with a single **Container** column showing the display path; clickable → `/containers?containerId=<id>` (mirrors the existing box-link pattern). *(verified: one Container column with full paths like "Garage / Shelf 43 / A07"; clicking navigates to /containers?containerId=… and highlights that row)*
+  - Update sort + advanced-search options accordingly (one `container` field matching against full path). *(verified: header sorts on the path; advanced search offers a single Container column option)*
+  - Container filter chip from URL param, same as today's location/box chips. *(verified: "Container: Garage" chip renders and clears; ?containerId= filters to that container + its whole subtree — all rows under Garage when filtered by Garage)*
+- [x] `frontend/src/components/ItemEntryForm.jsx`: replace the box-selector + location-selector XOR pair with one **tree dropdown** (MUI Autocomplete over containers grouped by parent; boxes visually distinguished). Selecting a container sets `containerId`; no more clearing logic between two fields. *(verified: indented tree options, boxes marked ▣ + "(BOX ID)"; created a test item end-to-end — it landed under "Garage / Shelf 43 / A07" with only containerId sent; test item deleted after)*
+- [x] Bulk edit: single "move to container" control replacing separate box/location bulk controls. *(verified: selected two items, Multi Edit → "Move to Container" tree dropdown → both moved from A07 to "Garage / Shelf 4 / A08"; no PUT /api/items/bulk endpoint exists — the existing per-item PUT loop is used, same as before)*
 
 ### Definition of Done — Stage 3
-- [ ] One Containers page fully manages the tree (create/rename/move/delete/view) on real data; old pages gone from nav and routes redirect.
-- [ ] Item list shows one clickable Container column; item form uses the single tree picker; bulk edit works.
-- [ ] No frontend code references `boxId`/`locationId` or the old location/box API functions (remove them from `frontend/src/services/api.js`).
+- [x] One Containers page fully manages the tree (create/rename/move/delete/view) on real data; old pages gone from nav and routes redirect. *(all flows exercised in a real browser against the live database via spare port 5099; test containers/items cleaned up afterwards)*
+- [x] Item list shows one clickable Container column; item form uses the single tree picker; bulk edit works. *(verified end-to-end incl. item create + bulk move on real data, then deleted)*
+- [x] No frontend code references `boxId`/`locationId` or the old location/box API functions (remove them from `frontend/src/services/api.js`). *(grep-verified: zero `locationId` hits; remaining `boxId` hits are only Container's own Box ID column/form field, box display labels in tree dropdowns, api.js doc comments, and DatabasesPage's CSV import-mapping keys — all intentional/Stage 7 territory. Old getBoxes/getLocations/etc. removed from api.js after grep confirmed no references)*
 
 ---
 

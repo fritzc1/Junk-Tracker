@@ -27,7 +27,6 @@ import {
   Edit as EditIcon,
   Delete as DeleteIcon,
   FormatListBulleted as FormatListBulletedIcon,
-  Inventory2 as Inventory2Icon,
 } from '@mui/icons-material';
 import { api } from '../services/api';
 import { useDatabases } from '../context/DatabaseContext';
@@ -117,11 +116,6 @@ const TagListPage = () => {
   // the "View Items" pattern on the Boxes page.
   const handleViewItems = (tag) => {
     navigate(`/items?tagId=${tag._id}`);
-  };
-
-  // Navigate to the Boxes page filtered by this tag (?tagId=...).
-  const handleViewBoxes = (tag) => {
-    navigate(`/boxes?tagId=${tag._id}`);
   };
 
   const handleDeleteConfirm = async () => {
@@ -215,11 +209,6 @@ const TagListPage = () => {
                     <Tooltip title="View Items">
                       <IconButton onClick={() => handleViewItems(tag)} size="small">
                         <FormatListBulletedIcon />
-                      </IconButton>
-                    </Tooltip>
-                    <Tooltip title="View Boxes">
-                      <IconButton onClick={() => handleViewBoxes(tag)} size="small">
-                        <Inventory2Icon />
                       </IconButton>
                     </Tooltip>
                     <Tooltip title="Edit Tag">
