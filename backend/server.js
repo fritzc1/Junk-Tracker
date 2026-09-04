@@ -296,13 +296,16 @@ async function main() {
   const Tag = require('./models/Tag');
   const Database = require('./models/Database');
   const Container = require('./models/Container');
+  const Attribute = require('./models/Attribute');
   await Promise.all([
     Box.syncIndexes(),
     Item.syncIndexes(),
     Location.syncIndexes(),
     Tag.syncIndexes(),
     Database.syncIndexes(),
-    Container.syncIndexes()
+    Container.syncIndexes(),
+    // Stage 4: attribute dimensions (unique per-database name index).
+    Attribute.syncIndexes()
   ]);
 
   // Final index check: guarantees the case-insensitive unique boxId index is in
@@ -335,6 +338,8 @@ app.use('/api/tags', requireDatabase, require('./routes/tags'));
 // Stage 2: unified container API. The old /api/locations and /api/boxes routes
 // stay mounted until Stage 7 so the not-yet-updated frontend keeps working.
 app.use('/api/containers', requireDatabase, require('./routes/containers'));
+// Stage 4: attribute dimensions (per active database).
+app.use('/api/attributes', requireDatabase, require('./routes/attributes'));
 app.use('/api/locations', requireDatabase, require('./routes/locations'));
 app.use('/api/boxes', requireDatabase, require('./routes/boxes'));
 

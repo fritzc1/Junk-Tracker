@@ -13,7 +13,7 @@
 | 1 | Container schema + data migration | ✅ Complete — applied 2026-09-04 (backup at `backend/backups/20260904-001557`); zero orphans, old collections intact |
 | 2 | Container API + item reference cutover | ✅ Complete — verified 2026-09-04 (spare-port API tests on real data; JSON + CSV round-trips into temp databases, fully cleaned up); old `/api/locations` and `/api/boxes` still mounted until Stage 7 |
 | 3 | Unified container UI + item page updates | ✅ Complete — verified 2026-09-04 (spare-port backend on 5099 + Vite dev server, real browser via Playwright: tree render/indentation, create/rename/move/delete incl. blocked-delete counts, ?containerId= highlight+chip, item Container column links, form tree picker end-to-end item save, bulk move; all test data cleaned up) |
-| 4 | Attribute system (backend) | ⬜ Not started |
+| 4 | Attribute system (backend) | ✅ Complete — verified 2026-09-04 (spare-port API tests on real data, 41/41 checks: dimension CRUD + usage counts, item validation 400s naming key/value, rename key rewrite with report, delete guards with counts, JSON export/import round-trip incl. attribute map into temp database; all test data cleaned up, before/after counts identical) |
 | 5 | Attribute system (frontend) | ⬜ Not started |
 | 6 | Attribute sets (type-scoped attribute profiles) | ⬜ Not started |
 | 7 | Cleanup, docs, hardening | ⬜ Not started |
@@ -194,22 +194,22 @@ erDiagram
 ## Stage 4 — Attribute system, backend
 
 ### Step 4a: Attribute model + item validation
-- [ ] Create `backend/models/Attribute.js`: `{ databaseId (required), name (unique per database, trim), values: [String] }`. Unique index on `(databaseId, name)`.
-- [ ] Update `backend/models/Item.js`: add sparse map field `attributes` (`{ type: Map, of: String, default: {} }`) — keys are dimension names, values are vocabulary strings.
-- [ ] Validation (controller-level, since it needs the Attribute collection): on item create/update, every key in `item.attributes` must be a defined dimension for that database and its value must be in that dimension's `values[]`; reject with a clear error otherwise.
+- [x] Create `backend/models/Attribute.js`: `{ databaseId (required), name (unique per database, trim), values: [String] }`. Unique index on `(databaseId, name)`. *(exact-match uniqueness — item attribute keys reference the name verbatim; pre-save hook trims/dedupes values and rejects names containing "." or starting with "$" that would break dotted-path queries)*
+- [x] Update `backend/models/Item.js`: add sparse map field `attributes` (`{ type: Map, of: String, default: {} }`) — keys are dimension name, values are vocabulary strings. *(purely additive; containerId and everything else untouched)*
+- [x] Validation (controller-level, since it needs the Attribute collection): on item create/update, every key in `item.attributes` must be a defined dimension for that database and its value must be in that dimension's `values[]`; reject with a clear error otherwise. *(verified: 400s name the offending key/value; empty/absent maps pass through unchanged; update only validates when the field is present so partial updates never touch attributes)*
 
 ### Step 4b: Attribute CRUD API
-- [ ] Create `backend/controllers/attributeController.js` + `backend/routes/attributes.js`, scoped per active database:
-  - List dimensions (with usage counts — how many items use each value).
-  - Create dimension; add/remove values.
-  - Rename dimension → also rewrite the key on all affected items (single transactional-ish pass with report).
-  - Delete dimension → block while any item uses it (return count); deleting a **value** likewise blocked while in use.
-- [ ] Register routes in `backend/server.js`.
+- [x] Create `backend/controllers/attributeController.js` + `backend/routes/attributes.js`, scoped per active database:
+  - List dimensions (with usage counts — how many items use each value). *(GET /api/attributes returns itemCount + per-value breakdown)*
+  - Create dimension; add/remove values. *(POST /api/attributes; POST|DELETE /api/attributes/:id/values — remove blocked while in use, count returned)*
+  - Rename dimension → also rewrite the key on all affected items (single transactional-ish pass with report). *(PUT /api/attributes/:id renames via one aggregation-pipeline updateMany over the affected items; response reports itemsRewritten — verified keys rewritten on real items)*
+  - Delete dimension → block while any item uses it (return count); deleting a **value** likewise blocked while in use. *(both return HTTP 400 with counts in data; verified blocked-then-successful after clearing usage)*
+- [x] Register routes in `backend/server.js`. *(also added Attribute.syncIndexes() to the startup index sync)*
 
 ### Definition of Done — Stage 4
-- [ ] Dimensions + values manageable via API per database; usage counts accurate.
-- [ ] Item save rejects out-of-vocabulary attribute values with actionable error messages.
-- [ ] Rename/delete guards verified (blocked cases return counts, not silent data loss).
+- [x] Dimensions + values manageable via API per database; usage counts accurate. *(verified: zero initially → 2 items {SMD:1,THT:1} after creates → back to zero after clearing)*
+- [x] Item save rejects out-of-vocabulary attribute values with actionable error messages. *(exact shapes: `Unknown attribute dimension "X". Define it first via POST /api/attributes.` and `Invalid value "Y" for attribute dimension "X". Allowed values: …`)*
+- [x] Rename/delete guards verified (blocked cases return counts, not silent data loss). *(rename reported itemsRewritten=2 with keys verified via item GET; delete-dimension blocked at 2 items, delete-value blocked at 1 item — both succeeded after usage cleared)*
 
 ---
 

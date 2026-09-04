@@ -30,6 +30,17 @@ const itemSchema = new mongoose.Schema({
     default: null
   },
 
+  // Sparse attribute map (Stage 4): dimension name -> vocabulary string. Keys
+  // are the names of Attribute dimensions defined for this database; values
+  // must be in that dimension's controlled vocabulary. Validation is done at
+  // controller level (it needs the Attribute collection). Defaults to an empty
+  // map — items without attributes are stored and served unchanged.
+  attributes: {
+    type: Map,
+    of: String,
+    default: {}
+  },
+
   // Tags associated with this item
   tags: [{
     type: mongoose.Schema.Types.ObjectId,

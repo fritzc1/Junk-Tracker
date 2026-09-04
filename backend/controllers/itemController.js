@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 const Item = require('../models/Item');
 const Container = require('../models/Container');
 const Tag = require('../models/Tag');
+const Attribute = require('../models/Attribute');
 const { stringify } = require('csv-stringify/sync');
 const XLSX = require('xlsx');
 const { loadContainerTree, computeDisplayPath } = require('../utils/containerTree');
@@ -79,6 +80,54 @@ const resolveTagNames = async (tagNames, databaseId) => {
   return tagIds;
 };
 
+// ---------------------------------------------------------------------------
+// Attribute validation (Stage 4)
+// ---------------------------------------------------------------------------
+// Items carry a sparse `attributes` map: dimension name -> vocabulary string.
+// The schema cannot enforce the vocabulary (it lives on the per-database
+// Attribute collection), so create/update validate at controller level: every
+// key must be a defined dimension for this database and its value must be in
+// that dimension's values[]. Items with no attributes / an empty map pass
+// through unchanged.
+
+const normalizeAttributesInput = (raw) => {
+  if (raw === undefined || raw === null) return {};
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error('attributes must be a JSON object mapping dimension names to values');
+  }
+  const out = {};
+  for (const [key, value] of Object.entries(raw)) {
+    const k = String(key).trim();
+    if (!k) continue; // ignore blank keys — nothing to validate or store
+    if (value === undefined || value === null || String(value).trim() === '') continue; // unset dimension
+    out[k] = String(value);
+  }
+  return out;
+};
+
+// Validate a normalized attribute map against the database's dimensions.
+// Returns { error } on the first violation, or { attributes: Map|null }.
+const validateAttributes = async (rawAttributes, databaseId) => {
+  const attrs = normalizeAttributesInput(rawAttributes);
+  if (Object.keys(attrs).length === 0) return { attributes: null }; // unchanged
+
+  const dimensions = await Attribute.find({ databaseId }).lean();
+  const byName = new Map(dimensions.map(d => [d.name, d]));
+
+  for (const [key, value] of Object.entries(attrs)) {
+    const dimension = byName.get(key);
+    if (!dimension) {
+      return { error: `Unknown attribute dimension "${key}". Define it first via POST /api/attributes.` };
+    }
+    if (!(dimension.values || []).includes(value)) {
+      const allowed = (dimension.values || []).join(', ') || '(none defined yet)';
+      return { error: `Invalid value "${value}" for attribute dimension "${key}". Allowed values: ${allowed}.` };
+    }
+  }
+
+  return { attributes: new Map(Object.entries(attrs)) };
+};
+
 // Attach the computed displayPath to each item (works for Mongoose docs and
 // lean objects alike — it is a plain own property that serializes in JSON).
 const attachDisplayPaths = (items, byId) => {
@@ -116,11 +165,18 @@ const createItem = async (req, res) => {
       return res.status(400).json({ success: false, error: refResult.error });
     }
 
+    // Stage 4: attribute keys/values must match this database's dimensions.
+    const attrResult = await validateAttributes(req.body.attributes, databaseId);
+    if (attrResult.error) {
+      return res.status(400).json({ success: false, error: attrResult.error });
+    }
+
     const item = await Item.create({
       databaseId,
       description: (description || '').toString().trim(),
       containerId: refResult.containerId,
-      tags: await resolveTagNames(tagNames, databaseId)
+      tags: await resolveTagNames(tagNames, databaseId),
+      ...(attrResult.attributes ? { attributes: attrResult.attributes } : {})
     });
 
     res.status(201).json({ success: true, data: await fetchItemWithContainer({ _id: item._id }) });
@@ -192,6 +248,17 @@ const updateItem = async (req, res) => {
       return res.status(400).json({ success: false, error: legacyErr });
     }
 
+    // Stage 4: attribute keys/values must match this database's dimensions.
+    // Only validated when the field is present so partial updates never touch
+    // an item's existing attributes.
+    let attrResult = null;
+    if (req.body.attributes !== undefined) {
+      attrResult = await validateAttributes(req.body.attributes, databaseId);
+      if (attrResult.error) {
+        return res.status(400).json({ success: false, error: attrResult.error });
+      }
+    }
+
     let item = await Item.findOne({ _id: req.params.id, databaseId });
     if (!item) {
       return res.status(404).json({ success: false, error: 'Item not found' });
@@ -215,6 +282,12 @@ const updateItem = async (req, res) => {
     // Handle tags from names (auto-create missing ones)
     if (tagNames && Array.isArray(tagNames)) {
       item.tags = await resolveTagNames(tagNames, databaseId);
+    }
+
+    // Stage 4: replace the attribute map when present. An empty object clears
+    // all attributes; absent leaves them untouched.
+    if (attrResult) {
+      item.attributes = attrResult.attributes || new Map();
     }
 
     item = await item.save();
@@ -254,9 +327,12 @@ const deleteItem = async (req, res) => {
 // active database's defined dimension names here and buildExportRow will emit
 // one column per dimension automatically — no other change needed. Until then
 // there are no dimensions, so this returns [].
+// Stage 4: the active database's defined dimension names, in name order. The
+// flattened CSV/XLSX export emits one dynamic column per returned dimension
+// (blank when unset) — see buildExportRow above.
 const getAttributeDimensions = async (databaseId) => {
-  // Stage 4: const dims = await Attribute.find({ databaseId }).select('name'); return dims.map(d => d.name);
-  return [];
+  const dims = await Attribute.find({ databaseId }).select('name').sort({ name: 1 });
+  return dims.map(d => d.name);
 };
 
 // Read one attribute value for a row. Handles both Mongoose Map docs and plain
