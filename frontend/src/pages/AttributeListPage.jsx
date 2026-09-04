@@ -312,7 +312,7 @@ const AttributeListPage = () => {
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
             margin="normal"
-            helperText='e.g., footprint, tolerance. Cannot contain "." or start with "$"; names are case-insensitively unique.'
+            helperText='e.g., footprint, tolerance. Cannot contain "." or start with "$"; names are case-insensitive.'
             autoFocus
           />
           <Box sx={{ mt: 2 }}>
