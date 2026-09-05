@@ -10,12 +10,16 @@ import {
   DialogContent,
   DialogTitle,
   Divider,
+  IconButton,
   TextField,
+  Tooltip,
   Typography,
 } from '@mui/material';
+import { Add as AddIcon } from '@mui/icons-material';
 import { api } from '../services/api';
 import TagSelector from './TagSelector';
 import AttributeEditor from './AttributeEditor';
+import ContainerQuickCreateDialog from './ContainerQuickCreateDialog';
 
 // Stage 5 revision (owner feedback): the unified item dialog — ONE code path for
 // view / edit / create. `item === null` means create mode (empty form); otherwise
@@ -78,6 +82,10 @@ const ItemDialog = ({ open, onClose, item, onSaved }) => {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
 
+  // Inline "+" quick-create: opens ContainerQuickCreateDialog with the container
+  // currently selected in the dropdown as parent (null/root when nothing is).
+  const [quickCreateOpen, setQuickCreateOpen] = useState(false);
+
   // (Re)initialize the form whenever the dialog opens or its target item changes.
   useEffect(() => {
     if (!open) return undefined;
@@ -119,6 +127,19 @@ const ItemDialog = ({ open, onClose, item, onSaved }) => {
   }, [open, item]);
 
   const depthMap = useMemo(() => computeDepthMap(containers), [containers]);
+
+  // After an inline quick-create: refetch the container list so the new node
+  // appears in the tree, and auto-select it (the item is being placed in a box
+  // that was just made for it).
+  const handleQuickCreated = async (created) => {
+    try {
+      const res = await api.getContainers();
+      if (res.success) setContainers(res.data || []);
+    } catch (err) {
+      console.error('Error refetching containers after quick-create:', err);
+    }
+    setSelectedContainerId(String(created._id));
+  };
 
   // Stage 6: the AttributeEditor POOL. A selected set narrows it to exactly that
   // set's member dimensions (its pickers and nothing else); no set → every
@@ -264,11 +285,43 @@ const ItemDialog = ({ open, onClose, item, onSaved }) => {
                   label="Container"
                   placeholder="Type to search or select a container..."
                   helperText="Boxes are marked with ▣. Clear the field to leave the item unassigned."
+                  slotProps={{
+                    // Merge — params.slotProps carries htmlInput (the Autocomplete
+                    // ref + handlers) and inputLabel; replacing it breaks the input.
+                    ...params.slotProps,
+                    input: {
+                      ...params.slotProps?.input,
+                      endAdornment: (
+                        <>
+                          {params.slotProps?.input?.endAdornment}
+                          <Tooltip title="Create a new container here">
+                            <IconButton
+                              size="small"
+                              edge="end"
+                              aria-label="Quick-create container"
+                              onClick={() => setQuickCreateOpen(true)}
+                            >
+                              <AddIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        </>
+                      ),
+                    },
+                  }}
                 />
               )}
             />
           )}
         </Box>
+
+        {/* Inline quick-create for the container picker above */}
+        <ContainerQuickCreateDialog
+          open={quickCreateOpen}
+          onClose={() => setQuickCreateOpen(false)}
+          defaultParentId={selectedContainerId || null}
+          parentLabel={containers.find(c => String(c._id) === selectedContainerId)?.displayPath}
+          onCreated={handleQuickCreated}
+        />
 
         {/* Tags — TagSelector loads its own options (per active database) */}
         <Box sx={{ mt: 2 }}>

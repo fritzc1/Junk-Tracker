@@ -38,6 +38,7 @@ import {
 } from '@mui/icons-material';
 import { api } from '../services/api';
 import { useDatabases } from '../context/DatabaseContext';
+import ContainerQuickCreateDialog from '../components/ContainerQuickCreateDialog';
 
 // Stage 3 of plans/container-tree-and-attributes-plan.md: the unified container
 // tree page. Replaces the old Locations + Boxes pages — one indented table for
@@ -160,13 +161,15 @@ const renderTreeOption = (props, c, depthMap) => {
 // Create / rename-move dialog. One form for both: `initial` is the container
 // being edited (rename/move) or null (create). The parent picker excludes the
 // container itself and its descendants so a move can never create a cycle.
-const ContainerFormDialog = ({ open, onClose, onSaved, initial, defaultParentId, containers }) => {
+const ContainerFormDialog = ({ open, onClose, onSaved, initial, defaultParentId, containers, onQuickCreated }) => {
   const [name, setName] = useState('');
   const [kind, setKind] = useState('location');
   const [boxId, setBoxId] = useState('');
   const [parent, setParent] = useState(ROOT_PARENT); // null = top level
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState(null);
+  // Inline "+" quick-create from the parent picker (rename/move only).
+  const [quickCreateOpen, setQuickCreateOpen] = useState(false);
 
   useEffect(() => {
     if (open) {
@@ -187,6 +190,15 @@ const ContainerFormDialog = ({ open, onClose, onSaved, initial, defaultParentId,
     const excluded = new Set([String(initial._id), ...collectDescendantIds(containers, initial._id)]);
     return containers.filter(c => !excluded.has(String(c._id)));
   }, [containers, initial]);
+
+  // After an inline quick-create: select the new container as the move target's
+  // parent (this is what makes stacking work — create A at root, it becomes the
+  // selected parent, "+" again -> B under A, ...). The page refetches via
+  // onQuickCreated so the fresh node appears in `containers`/parentOptions.
+  const handleQuickCreated = (created) => {
+    setParent(created._id);
+    onQuickCreated?.(created);
+  };
 
   const handleSubmit = async () => {
     if (!name.trim()) {
@@ -280,10 +292,48 @@ const ContainerFormDialog = ({ open, onClose, onSaved, initial, defaultParentId,
             noOptionsText="No matching containers"
             renderOption={(props, option) => renderTreeOption(props, option, depthMap)}
             renderInput={(params) => (
-              <TextField {...params} label="Parent" placeholder="(top level)" />
+              <TextField
+                {...params}
+                label="Parent"
+                placeholder="(top level)"
+                slotProps={{
+                  // Merge — params.slotProps carries htmlInput (the Autocomplete
+                  // ref + handlers) and inputLabel; replacing it breaks the input.
+                  ...params.slotProps,
+                  input: {
+                    ...params.slotProps?.input,
+                    endAdornment: initial ? (
+                      <>
+                        {params.slotProps?.input?.endAdornment}
+                        <Tooltip title="Create a new container here">
+                          <IconButton
+                            size="small"
+                            edge="end"
+                            aria-label="Quick-create parent container"
+                            onClick={() => setQuickCreateOpen(true)}
+                          >
+                            <AddIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      </>
+                    ) : params.slotProps?.input?.endAdornment,
+                  },
+                }}
+              />
             )}
           />
         </Box>
+
+        {/* Inline quick-create for the parent picker above (rename/move only) */}
+        {initial && (
+          <ContainerQuickCreateDialog
+            open={quickCreateOpen}
+            onClose={() => setQuickCreateOpen(false)}
+            defaultParentId={parent || null}
+            parentLabel={(parent ? parentOptions.find(c => String(c._id) === String(parent)) : null)?.displayPath}
+            onCreated={handleQuickCreated}
+          />
+        )}
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose}>Cancel</Button>
@@ -603,6 +653,7 @@ const ContainerListPage = () => {
         initial={editingContainer}
         defaultParentId={null}
         containers={containers}
+        onQuickCreated={() => fetchContainers()}
       />
 
       {/* Delete confirmation dialog */}
