@@ -95,6 +95,51 @@ export const api = {
   // Delete a container (400 + { childCount, itemCount } while blocked)
   deleteContainer: async (id) => request(`/containers/${id}`, { method: 'DELETE' }),
 
+  // --- Attribute API methods (Stage 4 backend; Stage 5 frontend) ---
+  // NOTE: the request helper resolves — it does not throw — on HTTP 400 with a
+  // JSON body, so callers must check `success` and surface `error` themselves.
+
+  // Get all attribute dimensions for the active database (sorted by name), each
+  // with live usage counts: itemCount + per-value valueCounts.
+  getAttributes: async () => request('/attributes'),
+
+  // Create a dimension ({ name, values? }) — 400 on empty/dotted/$-prefixed or
+  // case-insensitive duplicate names.
+  createAttribute: async (attributeData) =>
+    request('/attributes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(attributeData),
+    }),
+
+  // Rename and/or replace a dimension's value list ({ name?, values? }). A
+  // rename rewrites the key on all affected items; response reports itemsRewritten.
+  updateAttribute: async (id, attributeData) =>
+    request(`/attributes/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(attributeData),
+    }),
+
+  // Add one or more values ({ value } or { values: [] }).
+  addAttributeValues: async (id, values) =>
+    request(`/attributes/${id}/values`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(Array.isArray(values) ? { values } : { value: values }),
+    }),
+
+  // Remove one or more values — 400 + counts while any item still uses a value.
+  removeAttributeValues: async (id, values) =>
+    request(`/attributes/${id}/values`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(Array.isArray(values) ? { values } : { value: values }),
+    }),
+
+  // Delete a dimension — 400 + count while any item still uses it.
+  deleteAttribute: async (id) => request(`/attributes/${id}`, { method: 'DELETE' }),
+
   // --- Tag API methods ---
 
   getTags: async () => request('/tags'),

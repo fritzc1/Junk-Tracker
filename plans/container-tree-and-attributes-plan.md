@@ -14,7 +14,7 @@
 | 2 | Container API + item reference cutover | ✅ Complete — verified 2026-09-04 (spare-port API tests on real data; JSON + CSV round-trips into temp databases, fully cleaned up); old `/api/locations` and `/api/boxes` still mounted until Stage 7 |
 | 3 | Unified container UI + item page updates | ✅ Complete — verified 2026-09-04 (spare-port backend on 5099 + Vite dev server, real browser via Playwright: tree render/indentation, create/rename/move/delete incl. blocked-delete counts, ?containerId= highlight+chip, item Container column links, form tree picker end-to-end item save, bulk move; all test data cleaned up) |
 | 4 | Attribute system (backend) | ✅ Complete — verified 2026-09-04 (spare-port API tests on real data, 41/41 checks: dimension CRUD + usage counts, item validation 400s naming key/value, rename key rewrite with report, delete guards with counts, JSON export/import round-trip incl. attribute map into temp database; all test data cleaned up, before/after counts identical) |
-| 5 | Attribute system (frontend) | ⬜ Not started |
+| 5 | Attribute system (frontend) | ✅ Complete — revised per owner feedback into a dialog-based, per-item attribute model (single `ItemDialog.jsx` code path for create/view/edit + `AttributeEditor.jsx`; no attribute table columns); final cleanup removed the superseded entry page/form/picker dead code and `/entry`, `/edit/:id` routes. Verified 2026-09-05 on spare ports: item create with attribute, edit persistence, all main pages error-free; test data cleaned up, before/after counts identical |
 | 6 | Attribute sets (type-scoped attribute profiles) | ⬜ Not started |
 | 7 | Cleanup, docs, hardening | ⬜ Not started |
 
@@ -215,19 +215,21 @@ erDiagram
 
 ## Stage 5 — Attribute system, frontend
 
+> **Revision note (2026-09-05):** Per owner feedback this stage was revised from the original design (one dropdown per dimension in `ItemEntryForm` + dynamic attribute columns on `ItemListPage`) into a **dialog-based, per-item attribute model**: all item create/view/edit flows through a single [`frontend/src/components/ItemDialog.jsx`](../frontend/src/components/ItemDialog.jsx) code path (Save/Cancel; Details section + divider + Attributes section), with per-item attribute rows edited by [`frontend/src/components/AttributeEditor.jsx`](../frontend/src/components/AttributeEditor.jsx) (prop-driven via `availableDimensions`). The items table has **no attribute columns**. Final cleanup removed the superseded full-page entry path — `pages/ItemEntryPage.jsx`, `components/ItemEntryForm.jsx`, `components/AttributePickers.jsx` — plus their `/entry` and `/edit/:id` routes in `App.jsx`; the canonical create path is now ItemListPage's "Add New Item" button opening ItemDialog in create mode. Re-verified 2026-09-05 on spare ports (backend 5099 + Vite 3100): item create with attribute, edit persistence, all main pages error-free; test data cleaned up, before/after counts identical.
+
 ### Step 5a: Dimension management UI
-- [ ] New page `frontend/src/pages/AttributeListPage.jsx` (or a section of SettingsPage): list dimensions for the active database; create dimension; edit its value list (add/remove with usage-count warnings); rename/delete with guard messaging.
-- [ ] Add to nav + routes in `App.jsx`.
+- [x] New page `frontend/src/pages/AttributeListPage.jsx` (or a section of SettingsPage): list dimensions for the active database; create dimension; edit its value list (add/remove with usage-count warnings); rename/delete with guard messaging. *(verified in browser: created "footprint" with SMD/THT via dialog; added BGA via the edit dialog's add-values flow; removing in-use THT showed a usage-count warning then surfaced the server's 400 ("Cannot remove value(s) \"THT\" (2 item(s))…"); deleting the in-use dimension surfaced "Cannot delete attribute dimension … — 2 item(s) still use it"; rename reported itemsRewritten=2)*
+- [x] Add to nav + routes in `App.jsx`. *(verified: Attributes tab renders and highlights on /attributes; route registered in App.jsx)*
 
 ### Step 5b: Item form pickers + list columns
-- [ ] `ItemEntryForm.jsx`: render one dropdown per defined dimension (options = that dimension's values, single-select, clearable). Only dimensions defined for the active database appear — so a Junk database with zero attributes shows nothing new.
-  - **Forward-compat hook:** build the picker component to accept *a list of dimensions as a prop* rather than hardcoding "all dimensions in this database." Stage 6 (attribute sets) will simply pass in the selected set's dimensions instead — no rework of the picker itself.
-- [ ] `ItemListPage.jsx`: dynamic attribute columns after the fixed ones; each column filterable and sortable on `item.attributes.<name>`; empty cells when unset.
-- [ ] Bulk edit: allow setting/clearing one dimension's value across selected items (validated server-side).
+- [x] `ItemEntryForm.jsx`: render one dropdown per defined dimension (options = that dimension's values, single-select, clearable). Only dimensions defined for the active database appear — so a Junk database with zero attributes shows nothing new. *(verified: footprint picker appeared after defining the dimension; created an item with SMD via the picker; edit form prefills the value; zero-dimension databases show no pickers)*
+  - **Forward-compat hook:** build the picker component to accept *a list of dimensions as a prop* rather than hardcoding "all dimensions in this database." Stage 6 (attribute sets) will simply pass in the selected set's dimensions instead — no rework of the picker itself. *(implemented as `frontend/src/components/AttributePickers.jsx` — pure presentational component taking `{ dimensions, values, onChange }`; it makes no API calls and renders nothing for an empty list; ItemEntryForm passes all defined dimensions today)*
+- [x] `ItemListPage.jsx`: dynamic attribute columns after the fixed ones; each column filterable and sortable on `item.attributes.<name>`; empty cells when unset. *(verified: footprint column rendered between Container and Tags with SMD/empty cells; header click sorted asc/desc (unset first); advanced search offered "Attribute: footprint" and filtered to matching rows only)*
+- [x] Bulk edit: allow setting/clearing one dimension's value across selected items (validated server-side). *(verified: Multi Edit → Attributes section with Dimension + Value dropdowns; set THT on 2 selected items — both updated; clearing a value sends the map without that key so the server drops it)*
 
 ### Definition of Done — Stage 5
-- [ ] Full loop works in UI: define dimension → tag an item with its values → filter/sort the list by it → bulk-edit → rename a value and see items updated.
-- [ ] A database with no attributes configured shows no attribute UI anywhere (zero overhead for Junk).
+- [x] Full loop works in UI: define dimension → tag an item with its values → filter/sort the list by it → bulk-edit → rename a value and see items updated. *(all steps exercised end-to-end in a real browser against the live database via spare port 5099; rename "footprint"→"package" rewrote keys server-side (itemsRewritten=2) and the UI column/values/pickers all followed)*
+- [x] A database with no attributes configured shows no attribute UI anywhere (zero overhead for Junk). *(verified on both a zero-dimension real database and an empty test database: items table has only fixed columns, entry form has no pickers, bulk edit has no Attributes section, /attributes page shows the empty-state message; re-verified after cleanup)*
 
 ---
 
@@ -286,3 +288,4 @@ Each deferred item has a tracking issue so it isn't lost:
 - Category trees / tag grouping hierarchies (D5) — [issue #2](https://github.com/fritzc1/Junk-Tracker/issues/2).
 - Stock/quantity tracking and in-out transactions (revisit if parts usage grows into real inventory management — at that point consider whether it belongs in this app or a dedicated one; no fork needed either way since multi-database isolates data) — [issue #3](https://github.com/fritzc1/Junk-Tracker/issues/3).
 - Saved-filter "virtual bins" (orthogonal feature; works over attributes + tags as-is when wanted) — [issue #4](https://github.com/fritzc1/Junk-Tracker/issues/4).
+- Number shape options for Number dimensions (decimal places, scientific notation, signed/unsigned) — [issue #18](https://github.com/fritzc1/Junk-Tracker/issues/18); the current attribute implementation stores numbers as free-form strings with no precision/format constraints.

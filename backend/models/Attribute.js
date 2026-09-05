@@ -24,12 +24,31 @@ const attributeSchema = new mongoose.Schema({
     trim: true
   },
 
-  // Controlled vocabulary for this dimension (e.g., ["SMD", "THT"]). Item
-  // attribute values must be one of these strings.
+  // Controlled vocabulary for this dimension (e.g., ["SMD", "THT"]). When the
+  // list is non-empty, item attribute values must be one of these strings; when
+  // it is empty the dimension is UNRESTRICTED and free input is accepted (see
+  // validateAttributes in controllers/itemController.js).
   values: [{
     type: String,
     trim: true
   }],
+
+  // Stage 5 rev2: how to interpret free-input values on an unrestricted
+  // dimension. 'number' requires a parseable number; 'string'/'mixed' accept
+  // any non-empty text. Vocabulary values are always valid regardless of this.
+  dataType: {
+    type: String,
+    enum: ['number', 'string', 'mixed'],
+    default: 'string'
+  },
+
+  // Stage 5 rev2: optional display unit (e.g., "Ohm", "g"). Stored as an empty
+  // string when unset — the UI renders it as a suffix after value inputs.
+  unit: {
+    type: String,
+    trim: true,
+    default: ''
+  },
 
   // Timestamps
   createdAt: {
@@ -49,8 +68,8 @@ const attributeSchema = new mongoose.Schema({
 attributeSchema.index({ databaseId: 1, name: 1 }, { unique: true });
 
 // Update updatedAt before saving and defensively normalize the vocabulary:
-// trim each value, drop empties, dedupe (exact match). Mirrors the pre-save
-// conventions of the other per-database entities.
+// trim each value, drop empties, dedupe (exact match). Also normalizes `unit`
+// to a trimmed string ('' when unset) so the field is never null/undefined.
 attributeSchema.pre('save', function(next) {
   this.updatedAt = Date.now();
 
@@ -64,6 +83,8 @@ attributeSchema.pre('save', function(next) {
         return true;
       });
   }
+
+  this.unit = String(this.unit ?? '').trim();
 
   next();
 });

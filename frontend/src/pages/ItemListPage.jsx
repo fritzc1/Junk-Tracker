@@ -40,6 +40,7 @@ import { api } from '../services/api';
 import { useDatabases } from '../context/DatabaseContext';
 import SearchBar from '../components/SearchBar';
 import PaginationBar from '../components/PaginationBar';
+import ItemDialog from '../components/ItemDialog';
 import useRowsPerPage from '../hooks/useRowsPerPage';
 
 // Fixed column set for the items table. Stage 3: one Container column (full
@@ -50,8 +51,9 @@ const FIXED_COLUMNS = [
   { key: 'container', label: 'Container' },
 ];
 
-// Advanced search column options (fixed set)
-const SEARCH_COLUMN_OPTIONS = [
+// Advanced search column options — fixed columns + tags. Stage 5 appends one
+// option per defined attribute dimension (dynamic; see `searchColumnOptions`).
+const FIXED_SEARCH_COLUMN_OPTIONS = [
   ...FIXED_COLUMNS.map(c => ({ id: c.key, label: c.label })),
   { id: 'tags', label: 'Tags' },
 ];
@@ -170,6 +172,16 @@ const ItemListPage = () => {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
 
+  // Stage 5 revision: unified item dialog (view/edit/create). `dialogItem` is the
+  // row's item in edit mode or null in create mode — one code path for both.
+  const [itemDialogOpen, setItemDialogOpen] = useState(false);
+  const [dialogItem, setDialogItem] = useState(null);
+
+  const openItemDialog = (targetItem) => {
+    setDialogItem(targetItem || null);
+    setItemDialogOpen(true);
+  };
+
   // Bulk edit state
   const [bulkEditDescription, setBulkEditDescription] = useState('');
   const [bulkEditDescriptionChanged, setBulkEditDescriptionChanged] = useState(false);
@@ -179,6 +191,14 @@ const ItemListPage = () => {
   // Stage 3: single "move to container" control replaces the old box/location pair.
   const [bulkEditContainerId, setBulkEditContainerId] = useState(''); // prefilled shared id ('' when none/various)
   const [bulkEditContainerTouched, setBulkEditContainerTouched] = useState(false);
+
+  // Stage 5: attribute dimensions for the active database (dynamic columns +
+  // bulk edit). Empty list → no attribute UI anywhere.
+  const [dimensions, setDimensions] = useState([]);
+  // Bulk edit: one dimension's value across all selected items ('' = clear).
+  const [bulkEditAttributeDimId, setBulkEditAttributeDimId] = useState('');
+  const [bulkEditAttributeValue, setBulkEditAttributeValue] = useState('');
+  const [bulkEditAttributeTouched, setBulkEditAttributeTouched] = useState(false);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -219,6 +239,7 @@ const ItemListPage = () => {
     fetchContainers();
     fetchItems();
     fetchTags();
+    fetchAttributes();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeDatabaseId]);
 
@@ -242,6 +263,17 @@ const ItemListPage = () => {
       if (response.success) setTags(response.data);
     } catch (err) {
       console.error('Error fetching tags:', err);
+    }
+  };
+
+  // Stage 5: load the active database's attribute dimensions. A failed fetch
+  // just means no dynamic columns — it never blocks the item list itself.
+  const fetchAttributes = async () => {
+    try {
+      const response = await api.getAttributes();
+      if (response.success) setDimensions(response.data || []);
+    } catch (err) {
+      console.error('Error fetching attributes:', err);
     }
   };
 
@@ -316,7 +348,7 @@ const ItemListPage = () => {
   // Resolve the selected option object for a given criterion field ID
   const getSelectedColumnOption = (fieldId) => {
     if (!fieldId) return null;
-    return SEARCH_COLUMN_OPTIONS.find(o => o.id === fieldId) || null;
+    return searchColumnOptions.find(o => o.id === fieldId) || null;
   };
 
   // Advanced search: evaluate a single criterion against an item
@@ -496,6 +528,12 @@ const ItemListPage = () => {
     const containerIds = new Set(selectedItemsList.map(item => String(item.containerId?._id || '')));
     setBulkEditContainerId(containerIds.size === 1 ? containerIds.values().next().value : '');
 
+    // Stage 5 attributes: no prefill — the dimension picker starts empty and
+    // only applies when the user picks a dimension (and optionally a value).
+    setBulkEditAttributeDimId('');
+    setBulkEditAttributeValue('');
+    setBulkEditAttributeTouched(false);
+
     // Tags: reset to replace mode and prefill the shared tag set (or null = various).
     setBulkEditTagMode('replace');
     setBulkEditTags(getSharedTagPrefill());
@@ -542,8 +580,26 @@ const ItemListPage = () => {
         if (bulkEditContainerTouched) {
           payload.containerId = bulkEditContainerId || null;
         }
+        // Stage 5 attributes: replace the item's whole attribute map with its
+        // current values plus/minus this dimension, so other dimensions survive.
+        // '' clears the dimension (key omitted → server drops it). The server
+        // validates against the vocabulary and returns actionable 400 messages.
+        if (bulkEditAttributeTouched && bulkEditAttributeDimId) {
+          const dimName = dimensions.find(d => String(d._id) === bulkEditAttributeDimId)?.name;
+          if (dimName) {
+            const nextAttrs = { ...(item?.attributes || {}) };
+            if (bulkEditAttributeValue) nextAttrs[dimName] = bulkEditAttributeValue;
+            else delete nextAttrs[dimName];
+            payload.attributes = nextAttrs;
+          }
+        }
         if (Object.keys(payload).length > 0) {
-          await api.updateItem(itemId, payload);
+          // NOTE: api.js resolves — it does not throw — on HTTP 400 JSON bodies,
+          // so check `success` to surface the server's validation message.
+          const response = await api.updateItem(itemId, payload);
+          if (!response.success) {
+            throw new Error(response.error || 'Server rejected the update');
+          }
         }
       });
 
@@ -621,21 +677,27 @@ const ItemListPage = () => {
     }
   };
 
-  const handleEdit = (itemId) => {
-    navigate(`/edit/${itemId}`);
+  // Stage 5 revision: editing opens the unified dialog in place of navigating to
+  // the old /edit/:id page (that route still exists until the follow-up cleanup).
+  const handleEdit = (item) => {
+    openItemDialog(item);
   };
 
-  // Total column count for colSpan: checkbox + fixed columns + tags + created + modified + actions
+  // Total column count for colSpan: checkbox + fixed columns + tags + created +
+  // modified + actions. Stage 5 revision: the dynamic attribute columns are gone —
+  // attributes live in the item dialog now, not in the table.
   const totalColumns = 1 + FIXED_COLUMNS.length + 4;
 
   return (
     <Container maxWidth="xl" sx={{ mt: 4, mb: 4 }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
         <Typography variant="h4">Items</Typography>
+        {/* Stage 5 revision: "Add New Item" opens the unified dialog in create
+            mode (item === null) — same code path as editing. */}
         <Button
           variant="contained"
           startIcon={<AddIcon />}
-          onClick={() => navigate('/entry')}
+          onClick={() => openItemDialog(null)}
         >
           Add New Item
         </Button>
@@ -655,7 +717,7 @@ const ItemListPage = () => {
         placeholder="Search across all columns..."
         mode={searchMode}
         setMode={setSearchMode}
-        columnOptions={SEARCH_COLUMN_OPTIONS}
+        columnOptions={FIXED_SEARCH_COLUMN_OPTIONS}
         getSelectedColumnOption={getSelectedColumnOption}
         searchCriteria={searchCriteria}
         addCriterion={addSearchCriterion}
@@ -706,6 +768,10 @@ const ItemListPage = () => {
                   </Box>
                 </TableCell>
               ))}
+
+              {/* Stage 5 revision: no dynamic attribute columns — the table shows
+                  only Description / Container / Tags (+ dates/actions). Attributes
+                  are viewed/edited per item in the ItemDialog. */}
               <TableCell>
                 <Box sx={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 0.5 }} onClick={() => handleSort('tags')}>
                   <strong>Tags</strong>
@@ -764,7 +830,17 @@ const ItemListPage = () => {
                       : item.containerId;
                     return (
                       <TableCell key={col.key}>
-                        {col.key === 'container' && containerRef ? (
+                        {col.key === 'description' ? (
+                          // Stage 5 revision: the description is clickable and opens
+                          // the unified dialog for this item (view + edit in one place).
+                          <Typography
+                            component="span"
+                            sx={{ color: 'primary.main', cursor: 'pointer' }}
+                            onClick={() => openItemDialog(item)}
+                          >
+                            {item.description || '-'}
+                          </Typography>
+                        ) : col.key === 'container' && containerRef ? (
                           // The display path is a link to the Containers page filtered
                           // to this container (mirrors the old box-link pattern).
                           <Typography
@@ -790,7 +866,7 @@ const ItemListPage = () => {
                   <TableCell>{new Date(item.updatedAt).toLocaleString()}</TableCell>
                   <TableCell align="right">
                     <Tooltip title="Edit">
-                      <IconButton onClick={() => handleEdit(item._id)} size="small">
+                      <IconButton onClick={() => handleEdit(item)} size="small">
                         <EditIcon />
                       </IconButton>
                     </Tooltip>
@@ -851,6 +927,15 @@ const ItemListPage = () => {
         </Box>
       )}
 
+      {/* Unified item dialog — view/edit (item set) or create (item === null).
+          On successful save it closes itself and asks the list to refresh. */}
+      <ItemDialog
+        open={itemDialogOpen}
+        onClose={() => setItemDialogOpen(false)}
+        item={dialogItem}
+        onSaved={fetchItems}
+      />
+
       {/* Bulk Edit Dialog */}
       <Dialog open={bulkEditOpen} onClose={() => setBulkEditOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle>Bulk Edit — {selectedItems.size} item(s)</DialogTitle>
@@ -900,6 +985,8 @@ const ItemListPage = () => {
                 Various — items have different tags. Setting new tags will replace all existing tags on selected items.
               </Typography>
             )}
+            {/* MUI v9 renders multiple-mode chips via the built-in chip slot —
+                the old renderTags prop no longer exists and leaks to the DOM. */}
             <Autocomplete
               multiple
               freeSolo
@@ -907,9 +994,6 @@ const ItemListPage = () => {
               getOptionLabel={(opt) => typeof opt === 'string' ? opt : ''}
               value={bulkEditTags ?? []}
               onChange={handleBulkTagsChange}
-              renderTags={(value, getTagProps) =>
-                value.map((tag, i) => <Chip label={tag} {...getTagProps({ index: i })} key={i} />)
-              }
               renderInput={(params) => (
                 <TextField
                   {...params}
@@ -977,6 +1061,72 @@ const ItemListPage = () => {
               )}
             />
           </Box>
+
+          {dimensions.length > 0 && (
+            <>
+              <Divider sx={{ my: 2 }} />
+
+              {/* Stage 5 attributes — set/clear one dimension's value across all
+                  selected items. Validated server-side; 400 messages surface in the page alert. */}
+              <Box sx={{ mb: 2 }}>
+                <Typography variant="subtitle2" sx={{ mb: 1 }}>Attributes</Typography>
+                <Autocomplete
+                  options={dimensions}
+                  value={bulkEditAttributeDimId ? dimensions.find(d => String(d._id) === bulkEditAttributeDimId) || null : null}
+                  onChange={(e, newValue) => {
+                    setBulkEditAttributeDimId(newValue?._id || '');
+                    setBulkEditAttributeValue('');
+                    if (newValue) setBulkEditAttributeTouched(true);
+                  }}
+                  getOptionLabel={(d) => d?.name || ''}
+                  isOptionEqualToValue={(option, val) => option && val && String(option._id) === String(val._id)}
+                  renderInput={(params) => (
+                    <TextField {...params} label="Attribute" placeholder="(none)" helperText="Pick an attribute to set or clear its value on all selected items." />
+                  )}
+                />
+                {bulkEditAttributeDimId && (() => {
+                  // Stage 5 rev2: dimensions with an EMPTY values list get a plain
+                  // free-input TextField (type-aware helper text, same wording as
+                  // the item dialog) instead of a dropdown — so bulk editing works
+                  // for unrestricted dimensions too. Dimensions WITH values keep
+                  // the dropdown exactly as before. Server-side validation messages
+                  // still surface in the page alert either way.
+                  const dim = dimensions.find(d => String(d._id) === bulkEditAttributeDimId);
+                  const vocab = dim?.values || [];
+                  if (vocab.length === 0) {
+                    return (
+                      <TextField
+                        fullWidth
+                        label="Value"
+                        value={bulkEditAttributeValue}
+                        onChange={(e) => {
+                          setBulkEditAttributeValue(e.target.value);
+                          setBulkEditAttributeTouched(true);
+                        }}
+                        placeholder="(clear)"
+                        helperText={dim?.dataType === 'number' ? 'Enter a number (decimals allowed). Clear the field to remove this attribute from all selected items.' : 'Enter any value. Clear the field to remove this attribute from all selected items.'}
+                      />
+                    );
+                  }
+                  return (
+                    <Autocomplete
+                      options={vocab}
+                      value={bulkEditAttributeValue}
+                      onChange={(e, newValue) => {
+                        setBulkEditAttributeValue(newValue || '');
+                        setBulkEditAttributeTouched(true);
+                      }}
+                      getOptionLabel={(v) => v}
+                      noOptionsText="No values defined for this attribute"
+                      renderInput={(params) => (
+                        <TextField {...params} label="Value" placeholder="(clear)" helperText="Clear the field to remove this attribute from all selected items." />
+                      )}
+                    />
+                  );
+                })()}
+              </Box>
+            </>
+          )}
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setBulkEditOpen(false)}>Cancel</Button>
@@ -984,7 +1134,7 @@ const ItemListPage = () => {
             onClick={handleBulkSave}
             variant="contained"
             startIcon={<SaveIcon />}
-            disabled={!bulkEditDescriptionChanged && !bulkEditTagsChanged && !bulkEditContainerTouched}
+            disabled={!bulkEditDescriptionChanged && !bulkEditTagsChanged && !bulkEditContainerTouched && !(bulkEditAttributeTouched && bulkEditAttributeDimId)}
           >
             Save to {selectedItems.size} item(s)
           </Button>
