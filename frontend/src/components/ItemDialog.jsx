@@ -32,10 +32,14 @@ import ContainerQuickCreateDialog from './ContainerQuickCreateDialog';
 // per-item attributes are visually distinct from the standard properties.
 //
 // Data loading happens HERE (not in AttributeEditor): on open we fetch the
-// container list (for the tree dropdown) and the active database's attribute
-// dimensions, which form the POOL passed to AttributeEditor via its
-// `availableDimensions` prop. Stage 6 will swap that pool for a selected set's
-// dimensions without touching the editor itself.
+// container list (for the tree dropdown), the active database's attribute
+// dimensions, and its attribute sets (Stage 6). The POOL passed to AttributeEditor
+// via `availableDimensions` is the selected set's member dimensions when a set is
+// chosen — exactly that set's pickers and nothing else — or ALL defined dimensions
+// when no set is selected (the Stage 5 default; clearing the dropdown falls back
+// to it). Attributes already on the item but NOT in the selected set stay visible,
+// flagged "not in this set" (muted) so saving doesn't silently lose data; the
+// server rejects them with an actionable error if submitted.
 
 // Depth of every container (0 = root), walking parentId chains with a cycle guard.
 const computeDepthMap = (containers) => {
@@ -65,11 +69,15 @@ const ItemDialog = ({ open, onClose, item, onSaved }) => {
   const [tagNames, setTagNames] = useState([]);
   // This item's sparse attribute map: dimension name -> value ('' = row present, unset).
   const [attributes, setAttributes] = useState({});
+  // Stage 6: the selected attribute set id ('' = no set → all dimensions allowed).
+  const [selectedSetId, setSelectedSetId] = useState('');
 
-  // Options loaded on open. `dimensions` is the POOL for AttributeEditor — today
-  // every dimension defined in the active database (Stage 6: a selected set's).
+  // Options loaded on open. `dimensions` is the full pool of defined dimensions;
+  // `sets` are this database's attribute sets (Stage 6) — a selected set narrows
+  // the AttributeEditor pool to its member dimensions.
   const [containers, setContainers] = useState([]);
   const [dimensions, setDimensions] = useState([]);
+  const [sets, setSets] = useState([]);
   const [loadingOptions, setLoadingOptions] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
@@ -89,19 +97,24 @@ const ItemDialog = ({ open, onClose, item, onSaved }) => {
     setTagNames((item?.tags || []).map(t => t.name));
     // Sparse attribute map: dimension name -> value.
     setAttributes({ ...(item?.attributes || {}) });
+    // Stage 6: prefill the set picker (attributeSetId arrives as a raw id — the
+    // item API does not populate it).
+    setSelectedSetId(item?.attributeSetId ? String(item.attributeSetId) : '');
     setError(null);
 
     setLoadingOptions(true);
     let cancelled = false;
     const loadOptions = async () => {
       try {
-        const [containersRes, attributesRes] = await Promise.all([
+        const [containersRes, attributesRes, setsRes] = await Promise.all([
           api.getContainers(),
           api.getAttributes(),
+          api.getAttributeSets(),
         ]);
         if (cancelled) return;
         if (containersRes.success) setContainers(containersRes.data || []);
         if (attributesRes.success) setDimensions(attributesRes.data || []);
+        if (setsRes.success) setSets(setsRes.data || []);
       } catch (err) {
         console.error('Error loading dialog options:', err);
       } finally {
@@ -128,6 +141,30 @@ const ItemDialog = ({ open, onClose, item, onSaved }) => {
     setSelectedContainerId(String(created._id));
   };
 
+  // Stage 6: the AttributeEditor POOL. A selected set narrows it to exactly that
+  // set's member dimensions (its pickers and nothing else); no set → every
+  // dimension defined in the active database (the Stage 5 default).
+  const selectedSet = useMemo(
+    () => sets.find(s => String(s._id) === selectedSetId) || null,
+    [sets, selectedSetId]
+  );
+  const poolDimensions = useMemo(() => {
+    if (!selectedSet) return dimensions;
+    // Fall back to the full pool only when a set's members are all gone (e.g. a
+    // dimension was deleted while this dialog was open) — an empty picker pool
+    // would be useless, and the server still enforces membership on save.
+    const memberIds = new Set((selectedSet.attributeIds || []).map(String));
+    return dimensions.filter(d => memberIds.has(String(d._id)));
+  }, [selectedSet, dimensions]);
+
+  // Stage 6: attribute keys already on this item that are NOT in the selected
+  // set's pool — kept visible but flagged so saving doesn't silently lose data.
+  const outOfSetNames = useMemo(() => {
+    if (!selectedSet) return [];
+    const poolNames = new Set(poolDimensions.map(d => d.name));
+    return Object.keys(attributes).filter(name => !poolNames.has(name));
+  }, [selectedSet, poolDimensions, attributes]);
+
   // Backdrop/Esc close — suppressed mid-save so a slow request can't be lost.
   const handleClose = () => {
     if (!saving) onClose();
@@ -150,6 +187,10 @@ const ItemDialog = ({ open, onClose, item, onSaved }) => {
       const payload = {
         description: description.trim(),
         containerId: selectedContainerId || null,
+        // Stage 6: always sent (both modes) so clearing the dropdown actually
+        // removes the set; null = no set. The server validates attributes against
+        // it and rejects out-of-set keys with an actionable error.
+        attributeSetId: selectedSetId || null,
         tagNames,
       };
       if (!isCreate) {
@@ -292,10 +333,48 @@ const ItemDialog = ({ open, onClose, item, onSaved }) => {
         {/* Attributes — per-item selection from the dimension pool. Visually
             separated from Details by the divider + section heading above. */}
         <Typography variant="subtitle2" gutterBottom>Attributes</Typography>
+
+        {/* Stage 6: attribute set picker at the top of the section. Selecting a
+            set narrows the pickers below to exactly its member dimensions;
+            clearing it falls back to all defined dimensions (the default). */}
+        <Box sx={{ mb: 1 }}>
+          {loadingOptions ? null : sets.length > 0 ? (
+            <Autocomplete
+              options={sets}
+              value={selectedSetId ? sets.find(s => String(s._id) === selectedSetId) || null : null}
+              onChange={(e, newValue) => setSelectedSetId(newValue?._id || '')}
+              getOptionLabel={(s) => s?.name || ''}
+              isOptionEqualToValue={(option, val) => option && val && String(option._id) === String(val._id)}
+              noOptionsText="No attribute sets defined for this database"
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  label="Attribute set"
+                  placeholder="(none — all attributes allowed)"
+                  helperText={selectedSet
+                    ? `Only "${selectedSet.name}"'s dimensions are available: ${selectedSet.dimensions.map(d => d.name).join(', ') || '(none)'}.`
+                    : 'Pick a set to limit this item to its dimensions; clear it to allow any defined attribute.'}
+                />
+              )}
+            />
+          ) : (
+            <Typography variant="body2" color="text.secondary">
+              No attribute sets are defined for this database — all attributes are allowed.
+            </Typography>
+          )}
+        </Box>
+
+        {outOfSetNames.length > 0 && (
+          <Alert severity="warning" sx={{ mb: 1 }}>
+            {outOfSetNames.map(n => `"${n}"`).join(', ')} — not in this set. They are kept below but will be rejected on save unless removed or the set is cleared.
+          </Alert>
+        )}
+
         <AttributeEditor
-          availableDimensions={dimensions}
+          availableDimensions={poolDimensions}
           attributes={attributes}
           onChange={setAttributes}
+          flaggedNames={outOfSetNames}
         />
       </DialogContent>
       <DialogActions sx={{ px: 3, py: 2 }}>

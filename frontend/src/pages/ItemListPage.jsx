@@ -45,18 +45,29 @@ import useRowsPerPage from '../hooks/useRowsPerPage';
 
 // Fixed column set for the items table. Stage 3: one Container column (full
 // display path) replaces the old Location / Sub-Location / Box ID columns —
-// items reference a single containerId now.
+// items reference a single containerId now. Stage 6 adds a Set column showing
+// each item's attribute-set name (blank when none).
 const FIXED_COLUMNS = [
   { key: 'description', label: 'Item Description' },
   { key: 'container', label: 'Container' },
+  { key: 'set', label: 'Set' },
 ];
 
-// Advanced search column options — fixed columns + tags. Stage 5 appends one
-// option per defined attribute dimension (dynamic; see `searchColumnOptions`).
+// Advanced search column options — the fixed table columns (incl. the Stage 6
+// Set column) + tags.
 const FIXED_SEARCH_COLUMN_OPTIONS = [
   ...FIXED_COLUMNS.map(c => ({ id: c.key, label: c.label })),
   { id: 'tags', label: 'Tags' },
 ];
+
+// Stage 6: the item's attribute-set name ('' when it has no set). The backend
+// does not populate attributeSetId on items, so resolve via the sets list.
+const getSetName = (item, sets) => {
+  const ref = item.attributeSetId;
+  if (!ref) return '';
+  const match = (sets || []).find(s => String(s._id) === String(ref));
+  return match ? String(match.name) : '(unknown set)';
+};
 
 // Full display path for an item's container. The backend attaches `displayPath`
 // to every item response; the populated-container fallback covers any client
@@ -82,13 +93,16 @@ const getContainerPath = (item, containers) => {
   return parts.join(' / ');
 };
 
-// Display value for a fixed column on an item
-const getFixedColumnValue = (item, key, containers) => {
+// Display value for a fixed column on an item. `sets` is the active database's
+// attribute sets (Stage 6) — only needed for the Set column.
+const getFixedColumnValue = (item, key, containers, sets) => {
   switch (key) {
     case 'description':
       return String(item.description || '');
     case 'container':
       return getContainerPath(item, containers);
+    case 'set':
+      return getSetName(item, sets);
     default:
       return '';
   }
@@ -195,10 +209,16 @@ const ItemListPage = () => {
   // Stage 5: attribute dimensions for the active database (dynamic columns +
   // bulk edit). Empty list → no attribute UI anywhere.
   const [dimensions, setDimensions] = useState([]);
+  // Stage 6: attribute sets for the active database (Set column + bulk assign).
+  const [sets, setSets] = useState([]);
   // Bulk edit: one dimension's value across all selected items ('' = clear).
   const [bulkEditAttributeDimId, setBulkEditAttributeDimId] = useState('');
   const [bulkEditAttributeValue, setBulkEditAttributeValue] = useState('');
   const [bulkEditAttributeTouched, setBulkEditAttributeTouched] = useState(false);
+  // Stage 6: bulk-assign a set across the selection ('' = no change; null is
+  // never used here — '' means "untouched", and clearing uses explicit null).
+  const [bulkEditSetId, setBulkEditSetId] = useState('');
+  const [bulkEditSetTouched, setBulkEditSetTouched] = useState(false);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -240,6 +260,7 @@ const ItemListPage = () => {
     fetchItems();
     fetchTags();
     fetchAttributes();
+    fetchSets();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeDatabaseId]);
 
@@ -274,6 +295,17 @@ const ItemListPage = () => {
       if (response.success) setDimensions(response.data || []);
     } catch (err) {
       console.error('Error fetching attributes:', err);
+    }
+  };
+
+  // Stage 6: load the active database's attribute sets. A failed fetch just
+  // means no Set column values / bulk-assign options — it never blocks items.
+  const fetchSets = async () => {
+    try {
+      const response = await api.getAttributeSets();
+      if (response.success) setSets(response.data || []);
+    } catch (err) {
+      console.error('Error fetching attribute sets:', err);
     }
   };
 
@@ -314,8 +346,8 @@ const ItemListPage = () => {
           ? new Date(a[field]) - new Date(b[field])
           : new Date(b[field]) - new Date(a[field]);
       } else {
-        aVal = String(getFixedColumnValue(a, field, containers) ?? '');
-        bVal = String(getFixedColumnValue(b, field, containers) ?? '');
+        aVal = String(getFixedColumnValue(a, field, containers, sets) ?? '');
+        bVal = String(getFixedColumnValue(b, field, containers, sets) ?? '');
       }
       if (aVal < bVal) return direction === 'asc' ? -1 : 1;
       if (aVal > bVal) return direction === 'asc' ? 1 : -1;
@@ -348,7 +380,7 @@ const ItemListPage = () => {
   // Resolve the selected option object for a given criterion field ID
   const getSelectedColumnOption = (fieldId) => {
     if (!fieldId) return null;
-    return searchColumnOptions.find(o => o.id === fieldId) || null;
+    return FIXED_SEARCH_COLUMN_OPTIONS.find(o => o.id === fieldId) || null;
   };
 
   // Advanced search: evaluate a single criterion against an item
@@ -360,8 +392,9 @@ const ItemListPage = () => {
     if (criterion.field === 'tags') {
       fieldValue = (item.tags || []).map(t => t.name).join(', ');
     } else {
-      // The `container` field matches against the full display path.
-      fieldValue = getFixedColumnValue(item, criterion.field, containers);
+      // The `container` field matches against the full display path; the Stage 6
+      // `set` field matches against the item's attribute-set name ('' when none).
+      fieldValue = getFixedColumnValue(item, criterion.field, containers, sets);
     }
     const strValue = String(fieldValue ?? '').toLowerCase();
 
@@ -396,7 +429,7 @@ const ItemListPage = () => {
       if (!searchQuery.trim()) return true;
       const query = searchQuery.toLowerCase();
       const values = [
-        ...FIXED_COLUMNS.map(c => getFixedColumnValue(item, c.key, containers)),
+        ...FIXED_COLUMNS.map(c => getFixedColumnValue(item, c.key, containers, sets)),
         (item.tags || []).map(t => t.name).join(', ')
       ];
       return values.some(val => String(val ?? '').toLowerCase().includes(query));
@@ -492,6 +525,16 @@ const ItemListPage = () => {
     }
   );
 
+  // Stage 6: distribution of attribute-set assignments across the selection.
+  const setValueSummary = summarizeFieldValues(
+    item => String(item.attributeSetId || ''),
+    key => {
+      if (!key) return 'no set';
+      const s = sets.find(x => String(x._id) === key);
+      return `set "${s ? s.name : '(unknown set)'}"`;
+    }
+  );
+
   // Shared tag prefill for replace mode: array if all items share one tag set (possibly empty), null if various.
   const getSharedTagPrefill = () => {
     const tagSets = selectedItemsList.map(item =>
@@ -527,6 +570,12 @@ const ItemListPage = () => {
     // the caption shows the distribution)
     const containerIds = new Set(selectedItemsList.map(item => String(item.containerId?._id || '')));
     setBulkEditContainerId(containerIds.size === 1 ? containerIds.values().next().value : '');
+
+    // Stage 6: prefill the shared set id ('' when all have no set or various —
+    // the caption shows the distribution). Untouched until the user interacts.
+    const setIdValues = new Set(selectedItemsList.map(item => String(item.attributeSetId || '')));
+    setBulkEditSetId(setIdValues.size === 1 ? setIdValues.values().next().value : '');
+    setBulkEditSetTouched(false);
 
     // Stage 5 attributes: no prefill — the dimension picker starts empty and
     // only applies when the user picks a dimension (and optionally a value).
@@ -580,6 +629,13 @@ const ItemListPage = () => {
         if (bulkEditContainerTouched) {
           payload.containerId = bulkEditContainerId || null;
         }
+        // Stage 6: assign/clear a set across the selection when touched. The
+        // server validates each item's attributes against the NEW set and rejects
+        // out-of-set keys with an actionable error (surfaced below) — so items
+        // whose attributes fall outside the new set are not silently changed.
+        if (bulkEditSetTouched) {
+          payload.attributeSetId = bulkEditSetId || null;
+        }
         // Stage 5 attributes: replace the item's whole attribute map with its
         // current values plus/minus this dimension, so other dimensions survive.
         // '' clears the dimension (key omitted → server drops it). The server
@@ -603,6 +659,9 @@ const ItemListPage = () => {
         }
       });
 
+      // NOTE: itemPromises reject on the FIRST server validation failure, so a
+      // rejected bulk assign surfaces that item's actionable error (e.g. an
+      // attribute outside the new set) instead of failing silently.
       await Promise.all(itemPromises);
       setBulkEditOpen(false);
       fetchItems();
@@ -850,8 +909,11 @@ const ItemListPage = () => {
                           >
                             {getContainerPath(item, containers) || '(unknown container)'}
                           </Typography>
+                        ) : col.key === 'set' ? (
+                          // Stage 6: the item's attribute-set name — blank when none.
+                          getSetName(item, sets)
                         ) : (
-                          getFixedColumnValue(item, col.key, containers) || '-'
+                          getFixedColumnValue(item, col.key, containers, sets) || '-'
                         )}
                       </TableCell>
                     );
@@ -1062,6 +1124,38 @@ const ItemListPage = () => {
             />
           </Box>
 
+          {/* Stage 6: assign a set (or clear it) across all selected items. The
+              server validates each item's attributes against the NEW set and
+              rejects out-of-set keys with an actionable error — surfaced below. */}
+          <Box sx={{ mb: 2 }}>
+            {setValueSummary.length > 0 && !bulkEditSetTouched && (
+              <Typography variant="caption" color="warning.main" sx={{ display: 'block', mb: 1 }}>
+                Various — {formatDistribution(setValueSummary)}
+              </Typography>
+            )}
+            <Autocomplete
+              options={sets}
+              value={bulkEditSetId ? sets.find(s => String(s._id) === bulkEditSetId) || null : null}
+              onChange={(e, newValue) => {
+                setBulkEditSetId(newValue?._id || '');
+                setBulkEditSetTouched(true);
+              }}
+              getOptionLabel={(s) => s?.name || ''}
+              isOptionEqualToValue={(option, val) => option && val && String(option._id) === String(val._id)}
+              noOptionsText="No attribute sets defined for this database"
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  label="Attribute Set"
+                  placeholder="(no change)"
+                  helperText={bulkEditSetTouched && !bulkEditSetId
+                    ? 'Clearing removes the set from all selected items.'
+                    : 'Assigns this set to all selected items. Items with attributes outside it are rejected (with an error) — nothing is changed for those.'}
+                />
+              )}
+            />
+          </Box>
+
           {dimensions.length > 0 && (
             <>
               <Divider sx={{ my: 2 }} />
@@ -1134,7 +1228,7 @@ const ItemListPage = () => {
             onClick={handleBulkSave}
             variant="contained"
             startIcon={<SaveIcon />}
-            disabled={!bulkEditDescriptionChanged && !bulkEditTagsChanged && !bulkEditContainerTouched && !(bulkEditAttributeTouched && bulkEditAttributeDimId)}
+            disabled={!bulkEditDescriptionChanged && !bulkEditTagsChanged && !bulkEditContainerTouched && !bulkEditSetTouched && !(bulkEditAttributeTouched && bulkEditAttributeDimId)}
           >
             Save to {selectedItems.size} item(s)
           </Button>
