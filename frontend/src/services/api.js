@@ -140,6 +140,38 @@ export const api = {
   // Delete a dimension — 400 + count while any item still uses it.
   deleteAttribute: async (id) => request(`/attributes/${id}`, { method: 'DELETE' }),
 
+  // --- Attribute set API methods (Stage 6 — type-scoped attribute profiles) ---
+  // A set is a named group of dimensions; items carrying the set may only use
+  // those dimensions. Items store only the set id, so renaming touches no item
+  // data; deletion is blocked while items reference it (400 + { itemCount }).
+
+  // Get all attribute sets for the active database (sorted by name), each with
+  // its member dimensions populated ({ _id, name, values, dataType, unit }) and
+  // a live itemCount of items referencing the set.
+  getAttributeSets: async () => request('/attribute-sets'),
+
+  // Create a set ({ name, attributeIds? }) — 400 on empty or case-insensitive
+  // duplicate names; member ids must be dimensions of this database.
+  createAttributeSet: async (setData) =>
+    request('/attribute-sets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(setData),
+    }),
+
+  // Rename and/or replace a set's member-dimension list ({ name?, attributeIds? }).
+  // Renaming touches no item data; replacing members does not rewrite items —
+  // out-of-set attributes are rejected on the item's next save.
+  updateAttributeSet: async (id, setData) =>
+    request(`/attribute-sets/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(setData),
+    }),
+
+  // Delete a set — 400 + count while any item still references it.
+  deleteAttributeSet: async (id) => request(`/attribute-sets/${id}`, { method: 'DELETE' }),
+
   // --- Tag API methods ---
 
   getTags: async () => request('/tags'),

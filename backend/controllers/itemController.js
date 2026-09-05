@@ -3,6 +3,7 @@ const Item = require('../models/Item');
 const Container = require('../models/Container');
 const Tag = require('../models/Tag');
 const Attribute = require('../models/Attribute');
+const AttributeSet = require('../models/AttributeSet');
 const { stringify } = require('csv-stringify/sync');
 const XLSX = require('xlsx');
 const { loadContainerTree, computeDisplayPath } = require('../utils/containerTree');
@@ -62,6 +63,42 @@ const resolveContainerRef = async (containerId, databaseId) => {
   return { containerId: new mongoose.Types.ObjectId(idStr) };
 };
 
+// Stage 6: resolve an attributeSetId request value against the active database.
+// Returns { attributeSetId, setName?, setDimensionNames? } or { error }.
+// Empty/undefined/null -> no set (null). The member-dimension name set is built
+// from dimensions that still exist — a dimension can be deleted once no item
+// uses it, which may leave dangling ids in sets; only live members count.
+const resolveAttributeSetRef = async (attributeSetId, databaseId) => {
+  if (attributeSetId === undefined || attributeSetId === null || String(attributeSetId).trim() === '') {
+    return { attributeSetId: null };
+  }
+  const idStr = String(attributeSetId).trim();
+  if (!mongoose.isValidObjectId(idStr)) {
+    return { error: `Invalid attributeSetId: ${idStr}` };
+  }
+  const set = await AttributeSet.findOne({ _id: idStr, databaseId }).lean();
+  if (!set) {
+    return { error: 'Attribute set not found in this database.' };
+  }
+  const members = await Attribute.find({ _id: { $in: set.attributeIds || [] }, databaseId })
+    .select('name').lean();
+  return {
+    attributeSetId: new mongoose.Types.ObjectId(idStr),
+    setName: set.name,
+    setDimensionNames: new Set(members.map(d => d.name))
+  };
+};
+
+// Build the validateAttributes context for an item's STORED (unchanged) set —
+// used on updates that don't touch attributeSetId. Null when the item has no
+// set or its set was deleted out from under it (no scoping in that case).
+const loadStoredSetContext = async (item, databaseId) => {
+  if (!item.attributeSetId) return null;
+  const ref = await resolveAttributeSetRef(item.attributeSetId, databaseId);
+  if (ref.error || !ref.attributeSetId) return null;
+  return { name: ref.setName, dimensionNames: ref.setDimensionNames };
+};
+
 // Resolve tag names to IDs, auto-creating any missing tags (scoped to the
 // active database). Mirrors the box controller's tag handling so items and
 // containers share one tag namespace. Returns [] for empty/invalid input.
@@ -107,16 +144,25 @@ const normalizeAttributesInput = (raw) => {
   return out;
 };
 
-// Validate a normalized attribute map against the database's dimensions.
-// Returns { error } on the first violation, or { attributes: Map|null }.
+// Validate a normalized attribute map against the database's dimensions and —
+// when `setContext` ({ name, dimensionNames }) is given (Stage 6) — an item's
+// attribute set. Returns { error } on the first violation, or
+// { attributes: Map|null }.
+//
+// Set scoping (Stage 6): every key must be one of that set's member dimensions;
+// keys outside the set are rejected with an error naming both the attribute and
+// the set. The membership check applies to ALL keys — grandfathering does not
+// exempt out-of-set keys, so assigning a new set reconciles existing attributes
+// (the UI flags such rows "not in this set" before save). Items without a set
+// keep Stage 4/5 behavior: any defined dimension is allowed.
 //
 // Grandfathering (Stage 5 rev3): when `existingAttrs` is provided (item UPDATE),
 // a key/value pair that is byte-identical to what the item already stores skips
-// strict validation. This lets items keep values that were removed from a
+// strict VALUE validation. This lets items keep values that were removed from a
 // dimension's vocabulary later — editing such an item for any other reason must
 // not 400; only NEW or CHANGED values are held to the current rules. Create
 // never passes existingAttrs, so new items are always strictly validated.
-const validateAttributes = async (rawAttributes, databaseId, existingAttrs) => {
+const validateAttributes = async (rawAttributes, databaseId, existingAttrs, setContext) => {
   const attrs = normalizeAttributesInput(rawAttributes);
   if (Object.keys(attrs).length === 0) return { attributes: null }; // unchanged
 
@@ -127,7 +173,14 @@ const validateAttributes = async (rawAttributes, databaseId, existingAttrs) => {
     : (existingAttrs || {});
 
   for (const [key, value] of Object.entries(attrs)) {
-    // Unchanged pair from the item's current state — keep it as-is.
+    // Stage 6: set membership is enforced on every key — grandfathering does not
+    // exempt out-of-set keys (see the note above).
+    if (setContext && !setContext.dimensionNames.has(key)) {
+      return { error: `Attribute "${key}" is not part of attribute set "${setContext.name}". Remove it from the item or choose a different set.` };
+    }
+
+    // Unchanged pair from the item's current state — keep its (possibly stale)
+    // value as-is; only new/changed values are held to the current vocabulary.
     if (Object.prototype.hasOwnProperty.call(existing, key) && String(existing[key]) === value) continue;
 
     const dimension = byName.get(key);
@@ -192,8 +245,20 @@ const createItem = async (req, res) => {
       return res.status(400).json({ success: false, error: refResult.error });
     }
 
-    // Stage 4: attribute keys/values must match this database's dimensions.
-    const attrResult = await validateAttributes(req.body.attributes, databaseId);
+    // Stage 6: optional attribute set — scopes which dimensions this item may use.
+    const setRef = await resolveAttributeSetRef(req.body.attributeSetId, databaseId);
+    if (setRef.error) {
+      return res.status(400).json({ success: false, error: setRef.error });
+    }
+
+    // Stage 4/6: attribute keys/values must match this database's dimensions —
+    // and the item's set when one is assigned.
+    const attrResult = await validateAttributes(
+      req.body.attributes,
+      databaseId,
+      null,
+      setRef.attributeSetId ? { name: setRef.setName, dimensionNames: setRef.setDimensionNames } : null
+    );
     if (attrResult.error) {
       return res.status(400).json({ success: false, error: attrResult.error });
     }
@@ -202,6 +267,7 @@ const createItem = async (req, res) => {
       databaseId,
       description: (description || '').toString().trim(),
       containerId: refResult.containerId,
+      attributeSetId: setRef.attributeSetId,
       tags: await resolveTagNames(tagNames, databaseId),
       ...(attrResult.attributes ? { attributes: attrResult.attributes } : {})
     });
@@ -276,22 +342,48 @@ const updateItem = async (req, res) => {
     }
 
     // Fetch the current item first — its existing attribute map is needed for
-    // grandfathering (unchanged stale values stay valid on update).
+    // grandfathering (unchanged stale values stay valid on update), and its set
+    // for Stage 6 membership checks when the payload doesn't change it.
     let item = await Item.findOne({ _id: req.params.id, databaseId });
     if (!item) {
       return res.status(404).json({ success: false, error: 'Item not found' });
     }
 
-    // Stage 4 (relaxed in rev3): attribute keys/values must match this
-    // database's dimensions. Only validated when the field is present so
-    // partial updates never touch an item's existing attributes; unchanged
-    // key/value pairs are grandfathered through as-is.
+    // Stage 4/6: attribute keys/values must match this database's dimensions —
+    // and the item's set. The EFFECTIVE (post-update) set is the payload's when
+    // present, else the item's current one. Validation runs whenever the payload
+    // touches attributes OR the set — assigning a new set must reconcile the
+    // item's existing attributes even if the map itself isn't resent (bulk
+    // assign). Unchanged key/value pairs are grandfathered through as-is.
+    const setAssigned = req.body.attributeSetId !== undefined;
     let attrResult = null;
-    if (req.body.attributes !== undefined) {
-      attrResult = await validateAttributes(req.body.attributes, databaseId, item.attributes);
+    if (req.body.attributes !== undefined || setAssigned) {
+      let setContext = null;
+      let newSetId = item.attributeSetId || null;
+      if (setAssigned) {
+        const refResult = await resolveAttributeSetRef(req.body.attributeSetId, databaseId);
+        if (refResult.error) {
+          return res.status(400).json({ success: false, error: refResult.error });
+        }
+        newSetId = refResult.attributeSetId;
+        if (newSetId) {
+          setContext = { name: refResult.setName, dimensionNames: refResult.setDimensionNames };
+        }
+      } else {
+        setContext = await loadStoredSetContext(item, databaseId);
+      }
+
+      // Validate the payload's map when present; otherwise the item's stored map.
+      const rawAttrs = req.body.attributes !== undefined
+        ? req.body.attributes
+        : Object.fromEntries(item.attributes || new Map());
+      attrResult = await validateAttributes(rawAttrs, databaseId, item.attributes, setContext);
       if (attrResult.error) {
         return res.status(400).json({ success: false, error: attrResult.error });
       }
+
+      // Applied only after validation passes — a rejected update changes nothing.
+      item.attributeSetId = newSetId;
     }
 
     // Handle description

@@ -297,6 +297,7 @@ async function main() {
   const Database = require('./models/Database');
   const Container = require('./models/Container');
   const Attribute = require('./models/Attribute');
+  const AttributeSet = require('./models/AttributeSet');
   await Promise.all([
     Box.syncIndexes(),
     Item.syncIndexes(),
@@ -305,7 +306,10 @@ async function main() {
     Database.syncIndexes(),
     Container.syncIndexes(),
     // Stage 4: attribute dimensions (unique per-database name index).
-    Attribute.syncIndexes()
+    Attribute.syncIndexes(),
+    // Stage 6: attribute sets (unique per-database name index) + the item's
+    // attributeSetId index synced via Item.syncIndexes() above.
+    AttributeSet.syncIndexes()
   ]);
 
   // Final index check: guarantees the case-insensitive unique boxId index is in
@@ -340,6 +344,8 @@ app.use('/api/tags', requireDatabase, require('./routes/tags'));
 app.use('/api/containers', requireDatabase, require('./routes/containers'));
 // Stage 4: attribute dimensions (per active database).
 app.use('/api/attributes', requireDatabase, require('./routes/attributes'));
+// Stage 6: attribute sets — type-scoped attribute profiles (per active database).
+app.use('/api/attribute-sets', requireDatabase, require('./routes/attributeSets'));
 app.use('/api/locations', requireDatabase, require('./routes/locations'));
 app.use('/api/boxes', requireDatabase, require('./routes/boxes'));
 
