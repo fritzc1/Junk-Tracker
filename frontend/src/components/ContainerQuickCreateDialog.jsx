@@ -64,8 +64,14 @@ const ContainerQuickCreateDialog = ({ open, onClose, defaultParentId, onCreated,
   };
 
   const handleSubmit = async () => {
-    if (!name.trim()) {
-      setError('Container name is required');
+    // Identity rules: locations are identified by their name, boxes by their
+    // Box ID — each is required for its kind.
+    if (kind === 'location' && !name.trim()) {
+      setError('Location name is required');
+      return;
+    }
+    if (kind === 'box' && !boxId.trim()) {
+      setError('Box ID is required');
       return;
     }
     setSubmitting(true);
@@ -73,12 +79,12 @@ const ContainerQuickCreateDialog = ({ open, onClose, defaultParentId, onCreated,
     try {
       // api.js resolves (does not throw) on HTTP 400 JSON bodies, so check `success`.
       const payload = {
-        name: name.trim(),
         kind,
         parentId: defaultParentId || null,
       };
-      // boxId only applies to boxes (the backend rejects it otherwise).
-      if (kind === 'box') payload.boxId = boxId.trim();
+      // Boxes have no user-facing name — the server always sets it to the Box ID.
+      if (kind === 'location') payload.name = name.trim();
+      else payload.boxId = boxId.trim().toUpperCase();
 
       const response = await api.createContainer(payload);
       if (!response.success) {
@@ -124,16 +130,18 @@ const ContainerQuickCreateDialog = ({ open, onClose, defaultParentId, onCreated,
           </>
         ) : (
           <>
-            {/* Name */}
-            <TextField
-              autoFocus
-              fullWidth
-              label="Name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              margin="normal"
-              required
-            />
+            {/* Name — locations only; boxes are identified by their Box ID */}
+            {kind === 'location' && (
+              <TextField
+                autoFocus
+                fullWidth
+                label="Name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                margin="normal"
+                required
+              />
+            )}
 
             {/* Kind */}
             <Box sx={{ mt: 2 }}>
@@ -143,15 +151,17 @@ const ContainerQuickCreateDialog = ({ open, onClose, defaultParentId, onCreated,
               </ToggleButtonGroup>
             </Box>
 
-            {/* Box ID (boxes only) */}
+            {/* Box ID (boxes only) — the box's identity; no separate name field */}
             {kind === 'box' && (
               <TextField
+                autoFocus
                 fullWidth
                 label="Box ID"
                 value={boxId}
                 onChange={(e) => setBoxId(e.target.value.toUpperCase())}
                 margin="normal"
-                helperText="Optional — must be unique per database. Stored in uppercase."
+                required
+                helperText="Required — unique per database. Stored in uppercase."
               />
             )}
 
@@ -168,7 +178,11 @@ const ContainerQuickCreateDialog = ({ open, onClose, defaultParentId, onCreated,
         ) : (
           <>
             <Button onClick={handleClose} disabled={submitting}>Cancel</Button>
-            <Button variant="contained" onClick={handleSubmit} disabled={submitting || !name.trim()}>
+            <Button
+              variant="contained"
+              onClick={handleSubmit}
+              disabled={submitting || (kind === 'location' ? !name.trim() : !boxId.trim())}
+            >
               Create
             </Button>
           </>

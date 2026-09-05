@@ -33,6 +33,37 @@ const findSiblingNameCollision = async (databaseId, parentId, name, excludeId) =
   return Container.findOne(filter).lean();
 };
 
+// Cross-kind identity collision check (container-box-identity rework): within a
+// database the set of location names and the set of box IDs must be DISJOINT,
+// case-insensitively. A location named "A06" would render identically to box
+// "A06" in display paths / CSV export ("Garage / A06"), making re-imports of
+// hand-edited files ambiguous and human reading misleading. This is a
+// cross-document constraint, so it can't be an index — one query per write.
+// Returns { error } when the proposed (kind, name?, boxId?) collides with an
+// existing container of the other kind; `excludeId` skips self on updates.
+const findNameBoxIdCollision = async (databaseId, kind, name, boxId, excludeId) => {
+  const skip = excludeId ? { _id: { $ne: new mongoose.Types.ObjectId(excludeId) } } : {};
+  if (kind === 'box') {
+    // Proposed box ID must not match any existing location's name.
+    const norm = normalizeBoxId(boxId);
+    if (!norm) return null;
+    const hit = await Container.findOne({
+      databaseId, kind: 'location', ...skip,
+      name: new RegExp(`^${norm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i')
+    }).lean();
+    return hit ? `Box ID "${norm}" matches an existing location name. Rename the location or choose a different box ID.` : null;
+  }
+  // Proposed location name must not match any existing box's ID (boxes store
+  // canonical uppercase, so compare against the normalized form).
+  const normName = normalizeBoxId(name);
+  if (!normName) return null;
+  const hit = await Container.findOne({
+    databaseId, kind: 'box', ...skip,
+    boxId: new RegExp(`^${normName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i')
+  }).lean();
+  return hit ? `Location name "${String(name).trim()}" collides with an existing box ID. Rename the location or change that box's ID.` : null;
+};
+
 // Resolve tag input to ids. Accepts `tagNames` (strings, auto-created like the
 // box/item controllers) and/or `tags` (existing ObjectIds, validated against
 // the active database). Returns { tagIds, error }.
@@ -135,11 +166,6 @@ const createContainer = async (req, res) => {
     const databaseId = req.databaseId;
     const { name, kind } = req.body;
 
-    if (!name || !String(name).trim()) {
-      return res.status(400).json({ success: false, error: 'Container name is required' });
-    }
-    const trimmedName = String(name).trim();
-
     // Kind defaults to 'location'; reject anything outside the enum early so
     // the error message is ours (not Mongoose's generic validator text).
     let containerKind = 'location';
@@ -150,14 +176,25 @@ const createContainer = async (req, res) => {
       containerKind = kind;
     }
 
+    // Identity rules (container-box-identity rework): locations are identified
+    // by their name (required); boxes by their boxId (required) — a box has no
+    // user-facing name, its display label is always the ID itself.
+    const trimmedName = name !== undefined && name !== null ? String(name).trim() : '';
+    if (containerKind === 'location' && !trimmedName) {
+      return res.status(400).json({ success: false, error: 'Location name is required' });
+    }
+
     const parentResult = await validateParent(req.body.parentId, databaseId);
     if (parentResult.error) {
       return res.status(400).json({ success: false, error: parentResult.error });
     }
 
-    // boxId is only meaningful for boxes; normalize to canonical uppercase.
+    // boxId: canonical uppercase; required for boxes, forbidden elsewhere.
     const rawBoxId = req.body.boxId !== undefined && req.body.boxId !== null ? String(req.body.boxId) : '';
     const normalizedBoxId = normalizeBoxId(rawBoxId);
+    if (containerKind === 'box' && !normalizedBoxId) {
+      return res.status(400).json({ success: false, error: 'Boxes require a Box ID.' });
+    }
     if (normalizedBoxId && containerKind !== 'box') {
       return res.status(400).json({ success: false, error: "boxId is only valid for containers with kind 'box'" });
     }
@@ -168,22 +205,31 @@ const createContainer = async (req, res) => {
       }
     }
 
+    // Cross-kind collision: location names and box IDs must stay disjoint.
+    const storedName = containerKind === 'box' ? normalizedBoxId : trimmedName;
+    const collisionError = await findNameBoxIdCollision(databaseId, containerKind, storedName, normalizedBoxId);
+    if (collisionError) {
+      return res.status(409).json({ success: false, error: collisionError });
+    }
+
     const tagResult = await resolveContainerTags(req.body, databaseId);
     if (tagResult.error) {
       return res.status(400).json({ success: false, error: tagResult.error });
     }
 
-    // Non-blocking sibling-name duplicate warning (same name under the same
-    // parent is legal — "Shelf 43" can exist in both Garage and Theater).
+    // Non-blocking sibling-name duplicate warning — locations only; boxes are
+    // identified by their unique ID so a same-named sibling is impossible.
     const warnings = [];
-    const collision = await findSiblingNameCollision(databaseId, parentResult.parentId, trimmedName);
-    if (collision) {
-      warnings.push(`A sibling named "${trimmedName}" already exists under this parent.`);
+    if (containerKind === 'location') {
+      const collision = await findSiblingNameCollision(databaseId, parentResult.parentId, trimmedName);
+      if (collision) {
+        warnings.push(`A sibling named "${trimmedName}" already exists under this parent.`);
+      }
     }
 
     const container = await Container.create({
       databaseId,
-      name: trimmedName,
+      name: storedName, // boxes: always the boxId itself (internal display label)
       kind: containerKind,
       parentId: parentResult.parentId,
       boxId: normalizedBoxId || undefined, // omit when empty so the partial index stays clean
@@ -191,7 +237,7 @@ const createContainer = async (req, res) => {
     });
 
     const { byId } = await loadContainerTree(databaseId);
-    console.log(`[Container] Created ${containerKind} "${trimmedName}" (${String(container._id).slice(-8)})`);
+    console.log(`[Container] Created ${containerKind} "${storedName}" (${String(container._id).slice(-8)})`);
     res.status(201).json({
       success: true,
       warnings,
@@ -222,6 +268,9 @@ const updateContainer = async (req, res) => {
     const warnings = [];
 
     // --- Rename -------------------------------------------------------------
+    // For boxes the user-facing name is not editable — it always mirrors the
+    // boxId (applied below once the final kind/boxId are known). A `name` sent
+    // for a box is ignored.
     let newName = container.name;
     if (name !== undefined && name !== null) {
       const trimmedName = String(name).trim();
@@ -258,28 +307,53 @@ const updateContainer = async (req, res) => {
       }
     }
 
-    // --- boxId ----------------------------------------------------------------
-    if (req.body.boxId !== undefined) {
-      const normalizedBoxId = normalizeBoxId(req.body.boxId);
-      if (normalizedBoxId && container.kind !== 'box') {
-        return res.status(400).json({ success: false, error: "boxId is only valid for containers with kind 'box'" });
-      }
-      if (normalizedBoxId) {
-        const existing = await Container.findOne({ boxId: normalizedBoxId, databaseId, _id: { $ne: container._id } }).lean();
-        if (existing) {
-          return res.status(400).json({ success: false, error: `A box with ID "${normalizedBoxId}" already exists.` });
-        }
-      }
-      container.boxId = normalizedBoxId || undefined; // clearing -> omit the field
-    }
-
-    // --- kind (allow location<->box reclassification) ---------------------------
+    // --- boxId + kind (allow location<->box reclassification) -------------------
+    // Compute the FINAL state first, then validate it as a whole — so a request
+    // that changes both fields at once (e.g. reclassifying location -> box and
+    // supplying the ID in the same call) is checked correctly.
+    let finalKind = container.kind;
     if (kind !== undefined && kind !== null && kind !== '') {
       if (!['location', 'box'].includes(kind)) {
         return res.status(400).json({ success: false, error: "kind must be 'location' or 'box'" });
       }
-      container.kind = kind;
+      finalKind = kind;
     }
+
+    let finalBoxId = container.boxId || ''; // '' when the field is unset/omitted
+    if (req.body.boxId !== undefined) {
+      const normalizedBoxId = normalizeBoxId(req.body.boxId);
+      if (normalizedBoxId && finalKind !== 'box') {
+        return res.status(400).json({ success: false, error: "boxId is only valid for containers with kind 'box'" });
+      }
+      finalBoxId = normalizedBoxId; // '' -> clears the field on save
+    }
+
+    // Locations never carry a boxId — reclassifying away from box clears it.
+    if (finalKind !== 'box') finalBoxId = '';
+
+    if (finalKind === 'box' && !finalBoxId) {
+      return res.status(400).json({ success: false, error: 'Boxes require a Box ID.' });
+    }
+    if (finalBoxId) {
+      const existing = await Container.findOne({ boxId: finalBoxId, databaseId, _id: { $ne: container._id } }).lean();
+      if (existing) {
+        return res.status(400).json({ success: false, error: `A box with ID "${finalBoxId}" already exists.` });
+      }
+    }
+
+    // For boxes the display label always mirrors the boxId; for locations it is
+    // the user-supplied name (or the existing one when unchanged).
+    const finalName = finalKind === 'box' ? finalBoxId : newName;
+
+    // Cross-kind collision on the FINAL state: location names and box IDs must
+    // stay disjoint within a database.
+    const collisionError = await findNameBoxIdCollision(databaseId, finalKind, finalName, finalBoxId, container._id);
+    if (collisionError) {
+      return res.status(409).json({ success: false, error: collisionError });
+    }
+
+    container.kind = finalKind;
+    container.boxId = finalBoxId || undefined; // clearing -> omit the field
 
     // --- tags -------------------------------------------------------------------
     const tagResult = await resolveContainerTags(req.body, databaseId);
@@ -290,19 +364,21 @@ const updateContainer = async (req, res) => {
       container.tags = tagResult.tagIds; // only applied when the field is present
     }
 
-    // Sibling-name collision warning for the resulting (name, parent) pair.
-    const effectiveName = newName;
+    // Sibling-name collision warning for the resulting (name, parent) pair —
+    // locations only; boxes are identified by their unique ID.
+    const effectiveName = finalName;
     const effectiveParentId = newParentId;
-    if (effectiveName !== container.name || String(effectiveParentId || '') !== String(container.parentId || '')) {
+    if (finalKind === 'location' &&
+        (effectiveName !== container.name || String(effectiveParentId || '') !== String(container.parentId || ''))) {
       const collision = await findSiblingNameCollision(databaseId, effectiveParentId, effectiveName, container._id);
       if (collision) {
         warnings.push(`A sibling named "${effectiveName}" already exists under this parent.`);
       }
     }
 
-    container.name = newName;
+    container.name = finalName; // boxes: always mirrors the boxId
     container.parentId = newParentId;
-    container = await container.save(); // pre-save hook re-checks the cycle guard
+    container = await container.save(); // pre-save hook re-checks cycle + box rules
 
     const { byId } = await loadContainerTree(databaseId);
     res.status(200).json({

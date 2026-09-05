@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { normalizeBoxId } = require('../utils/boxId');
 
 // Unified container entity (Stage 1 of plans/container-tree-and-attributes-plan.md).
 // Merges the old Location and Box entities into one tree: `kind` is 'location'
@@ -13,9 +14,11 @@ const containerSchema = new mongoose.Schema({
     required: true
   },
 
-  // Human-readable name (e.g., "Garage", "Shelf 43", "A06"). NO global
-  // uniqueness — siblings may share names under different parents ("Shelf 43"
-  // in Garage and in Theater are distinct containers).
+  // Display label. For locations: the user-facing name (e.g., "Garage",
+  // "Shelf 43") — NO global uniqueness, siblings may share names under
+  // different parents ("Shelf 43" in Garage and in Theater are distinct).
+  // For boxes: NOT user-editable — always auto-set to the boxId on every write
+  // (see controllers/containerController.js) so display paths stay uniform.
   name: {
     type: String,
     required: true,
@@ -36,7 +39,9 @@ const containerSchema = new mongoose.Schema({
     default: null
   },
 
-  // Physical box label (e.g., "A06"). Only meaningful when kind='box'.
+  // Physical box label (e.g., "A06") — the box's stable identity. REQUIRED for
+  // kind='box' (enforced in the pre-save hook below and at the API edge); only
+  // meaningful for boxes, never set on locations.
   boxId: {
     type: String,
     trim: true
@@ -88,14 +93,22 @@ containerSchema.index(
 containerSchema.index({ parentId: 1 });
 containerSchema.index({ databaseId: 1, parentId: 1 });
 
-// Update updatedAt and enforce the cycle guard before saving. The guard walks
-// up from parentId and rejects the save if this document's _id appears among
-// its own ancestors (defense-in-depth; controllers also check on move). A
-// visited-set also catches pre-existing cycles in the stored data instead of
-// looping forever.
+// Update updatedAt, enforce box identity rules, and run the cycle guard before
+// saving. Box rules (container-box-identity rework): a kind='box' container
+// MUST carry a non-empty boxId — it is the box's stable identity; locations
+// must never have one. The API edge in controllers/containerController.js
+// enforces this with clearer messages; this hook is defense-in-depth for any
+// other write path (scripts, imports).
 containerSchema.pre('save', async function (next) {
   try {
     this.updatedAt = Date.now();
+
+    if (this.kind === 'box' && !normalizeBoxId(this.boxId)) {
+      return next(new Error("Boxes require a Box ID."));
+    }
+    if (this.kind !== 'box' && normalizeBoxId(this.boxId)) {
+      return next(new Error("boxId is only valid for containers with kind 'box'"));
+    }
 
     if (!this._id || !this.parentId) return next();
 

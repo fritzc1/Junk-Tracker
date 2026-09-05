@@ -250,19 +250,14 @@ const ItemDialog = ({ open, onClose, item, onSaved }) => {
               options={containers}
               value={selectedContainerId ? containers.find(c => String(c._id) === selectedContainerId) || null : null}
               onChange={(e, newValue) => setSelectedContainerId(newValue?._id || '')}
-              getOptionLabel={(c) => {
-                if (!c) return '';
-                const boxSuffix = c.kind === 'box' && c.boxId ? ` (${c.boxId})` : '';
-                return `${c.displayPath || c.name}${boxSuffix}`;
-              }}
+              // Boxes store name === boxId, so the display path already ends in
+              // the ID — no separate suffix needed.
+              getOptionLabel={(c) => (c ? (c.displayPath || c.name) : '')}
               isOptionEqualToValue={(option, val) => option && val && String(option._id) === String(val._id)}
               filterOptions={(options, params) => {
                 const query = (params.inputValue || '').trim().toLowerCase();
                 if (!query) return options;
-                return options.filter(c => {
-                  const label = `${c.displayPath || c.name} ${c.boxId || ''}`.toLowerCase();
-                  return label.includes(query);
-                });
+                return options.filter(c => (c.displayPath || c.name).toLowerCase().includes(query));
               }}
               noOptionsText="No matching containers"
               renderOption={(props, option) => {
@@ -273,7 +268,6 @@ const ItemDialog = ({ open, onClose, item, onSaved }) => {
                       <Typography variant="body2" color={option.kind === 'box' ? 'primary.main' : 'text.primary'}>
                         {'\u00A0'.repeat((depthMap.get(String(option._id)) || 0) * 2)}
                         {option.kind === 'box' ? '▣ ' : ''}{option.name}
-                        {option.boxId ? ` (${option.boxId})` : ''}
                       </Typography>
                     </Box>
                   </li>

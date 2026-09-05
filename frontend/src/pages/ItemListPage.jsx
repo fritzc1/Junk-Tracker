@@ -1107,7 +1107,6 @@ const ItemListPage = () => {
                     <Typography variant="body2">
                       {'\u00A0'.repeat((containerDepthMap.get(String(option._id)) || 0) * 2)}
                       {option.kind === 'box' ? '▣ ' : ''}{option.name}
-                      {option.boxId ? ` (${option.boxId})` : ''}
                     </Typography>
                   </li>
                 );
