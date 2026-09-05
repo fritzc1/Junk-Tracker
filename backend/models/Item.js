@@ -41,6 +41,18 @@ const itemSchema = new mongoose.Schema({
     default: {}
   },
 
+  // Stage 6: optional attribute set (type-scoped attribute profile). When set,
+  // every key in `attributes` must belong to one of the set's member dimensions
+  // and its value must be within that dimension's vocabulary — enforced at
+  // controller level (it needs the AttributeSet + Attribute collections). Items
+  // without a set keep Stage 4/5 behavior: any defined dimension is allowed.
+  // Purely additive — existing items simply have no set; no migration needed.
+  attributeSetId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'AttributeSet',
+    default: null
+  },
+
   // Tags associated with this item
   tags: [{
     type: mongoose.Schema.Types.ObjectId,
@@ -62,6 +74,10 @@ const itemSchema = new mongoose.Schema({
 // Index for "items directly in container X" queries (container list counts,
 // delete guards, detail views).
 itemSchema.index({ containerId: 1 });
+
+// Stage 6: index for the attribute-set delete guard ("how many items still
+// reference this set?") and per-set item lookups.
+itemSchema.index({ attributeSetId: 1 });
 
 // Update the updatedAt field before saving. The old XOR pre-save hook is gone
 // with the boxId/locationId fields it validated.

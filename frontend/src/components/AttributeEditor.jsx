@@ -31,6 +31,10 @@ import { Delete as DeleteIcon } from '@mui/icons-material';
 //     (the server drops blank values on save).
 //   onChange — called with the NEXT FULL MAP whenever a row is added, a value
 //     changes/clears, or a row is removed. The parent owns all state + loading.
+//   flaggedNames — OPTIONAL (Stage 6): names of rows that are NOT in the active
+//     pool (e.g., attributes on an item whose set doesn't include them). Such
+//     rows stay visible but render muted with a "not in this set" note so saving
+//     doesn't silently lose data; the server rejects them if submitted.
 //
 // Pure/presentational: no API calls and no internal data state of its own (the
 // useState hooks below are UI-only: the add-control reset + focus-on-add).
@@ -39,7 +43,8 @@ import { Delete as DeleteIcon } from '@mui/icons-material';
 const freeInputHelper = (dataType) =>
   dataType === 'number' ? 'Enter a number (decimals allowed)' : 'Enter any value';
 
-const AttributeEditor = ({ availableDimensions, attributes, onChange }) => {
+const AttributeEditor = ({ availableDimensions, attributes, onChange, flaggedNames }) => {
+  const flagged = new Set(Array.isArray(flaggedNames) ? flaggedNames : []);
   const pool = Array.isArray(availableDimensions) ? availableDimensions : [];
   const current = attributes && typeof attributes === 'object' ? attributes : {};
   const presentNames = Object.keys(current);
@@ -134,9 +139,13 @@ const AttributeEditor = ({ availableDimensions, attributes, onChange }) => {
         </Typography>
       ) : null}
 
-      {/* One row per attribute currently present on this item */}
+      {/* One row per attribute currently present on this item. Stage 6: rows
+          whose names are in `flagged` (not in the active set's pool) render
+          muted with a "not in this set" note — kept visible so saving doesn't
+          silently lose data; the server rejects them if submitted. */}
       {presentNames.map((name) => {
         const dimension = pool.find(d => d.name === name);
+        const isFlagged = flagged.has(name);
         // Defensive: if a stored value is no longer in the vocabulary (e.g. the
         // value list changed while this dialog was open), keep it selectable.
         const vocab = dimension?.values || [];
@@ -147,9 +156,12 @@ const AttributeEditor = ({ availableDimensions, attributes, onChange }) => {
         const isFreeInput = vocab.length === 0;
         const unit = dimension?.unit || '';
         return (
-          <Box key={name} sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 1.5 }}>
-            <Typography variant="body2" sx={{ minWidth: 130, flexShrink: 0 }} title={name}>
+          <Box key={name} sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 1.5, opacity: isFlagged ? 0.6 : 1 }}>
+            <Typography variant="body2" sx={{ minWidth: 130, flexShrink: 0 }} title={isFlagged ? `${name} — not in this set` : name}>
               {name}
+              {isFlagged && (
+                <Typography component="span" variant="caption" color="warning.main"> ⚠</Typography>
+              )}
             </Typography>
             <Box sx={{ flex: 1 }}>
               {isFreeInput ? (
@@ -194,6 +206,12 @@ const AttributeEditor = ({ availableDimensions, attributes, onChange }) => {
           </Box>
         );
       })}
+
+      {presentNames.filter(n => flagged.has(n)).length > 0 && (
+        <Typography variant="caption" color="warning.main" sx={{ display: 'block', mt: 1 }}>
+          ⚠ Rows marked are not in the selected attribute set — remove them or clear the set before saving.
+        </Typography>
+      )}
 
       {addableDimensions.length > 0 ? renderAddControl() : null}
     </>
