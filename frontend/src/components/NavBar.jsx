@@ -23,9 +23,8 @@ import StorageIcon from '@mui/icons-material/Storage';
 import { useDatabases } from '../context/DatabaseContext';
 
 // Top-level sections and the route prefixes that map to each one.
-// Entry/edit pages highlight their parent section (e.g. /edit/:id → Items).
 const SECTIONS = [
-  { label: 'Items', value: 'items', paths: ['/', '/items', '/entry', '/edit'] },
+  { label: 'Items', value: 'items', paths: ['/', '/items'] },
   // Stage 3: one Containers section replaces the old Boxes + Locations tabs.
   // The legacy /boxes and /locations prefixes still resolve here so deep links
   // (which redirect to /containers) keep highlighting the right tab.

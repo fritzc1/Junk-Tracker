@@ -175,8 +175,8 @@ const ItemDialog = ({ open, onClose, item, onSaved }) => {
           required
         />
 
-        {/* Container — one tree dropdown for boxes and locations (same pattern as
-            ItemEntryForm: options indented by depth, boxes marked with ▣). */}
+        {/* Container — one tree dropdown for boxes and locations (options indented
+            by depth, boxes marked with ▣). */}
         <Box sx={{ mt: 2 }}>
           {loadingOptions ? (
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, py: 1.5 }}>
