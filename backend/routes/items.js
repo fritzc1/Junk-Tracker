@@ -314,7 +314,9 @@ router.post('/import/json', async (req, res) => {
       const cCreatedAt = parseTs(c.createdAt);
       const cUpdatedAt = parseTs(c.updatedAt);
 
-      const createDoc = () => ({ databaseId, name: c.name.trim(), kind, parentId: targetParentId || null, boxId, tags });
+      // Boxes always store name === boxId (container-box-identity rework) — a
+      // stale/different name in an old snapshot must not break the invariant.
+      const createDoc = () => ({ databaseId, name: kind === 'box' && boxId ? boxId : c.name.trim(), kind, parentId: targetParentId || null, boxId, tags });
 
       const queueTsRestore = () => {
         if (cCreatedAt || cUpdatedAt) {
@@ -632,7 +634,9 @@ router.post('/import', upload.single('file'), async (req, res) => {
         if (existing) {
           containerId = String(existing._id);
         } else {
-          const created = await Container.create({ databaseId, name: leafName || boxIdValue, kind: 'box', parentId: parentId || null, boxId: boxIdValue });
+          // Boxes always store name === boxId (container-box-identity rework) —
+          // a legacy file's container label for the same row is not preserved.
+          const created = await Container.create({ databaseId, name: boxIdValue, kind: 'box', parentId: parentId || null, boxId: boxIdValue });
           console.log(`[IMPORT] Created box container: "${created.name}" (ID ${boxIdValue})`);
           containerId = String(created._id);
         }

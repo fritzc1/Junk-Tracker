@@ -151,7 +151,6 @@ const renderTreeOption = (props, c, depthMap) => {
         <Typography variant="body2">
           {'\u00A0'.repeat((depthMap.get(String(c._id)) || 0) * 2)}
           {c.name}
-          {c.boxId ? ` (${c.boxId})` : ''}
         </Typography>
       </Box>
     </li>
@@ -201,20 +200,27 @@ const ContainerFormDialog = ({ open, onClose, onSaved, initial, defaultParentId,
   };
 
   const handleSubmit = async () => {
-    if (!name.trim()) {
-      setFormError('Container name is required');
+    // Identity rules: locations are identified by their name, boxes by their
+    // Box ID — each is required for its kind.
+    if (kind === 'location' && !name.trim()) {
+      setFormError('Location name is required');
+      return;
+    }
+    if (kind === 'box' && !boxId.trim()) {
+      setFormError('Box ID is required');
       return;
     }
     setSaving(true);
     setFormError(null);
     try {
       const payload = {
-        name: name.trim(),
         kind,
         parentId: parent || null,
       };
+      // Boxes have no user-facing name — the server always sets it to the Box ID.
+      if (kind === 'location') payload.name = name.trim();
       // boxId only applies to boxes (the backend rejects it otherwise).
-      if (kind === 'box') payload.boxId = boxId.trim();
+      if (kind === 'box') payload.boxId = boxId.trim().toUpperCase();
       else if (initial?.boxId) payload.boxId = ''; // reclassifying away from box clears the ID
 
       const response = initial
@@ -242,16 +248,18 @@ const ContainerFormDialog = ({ open, onClose, onSaved, initial, defaultParentId,
           </Alert>
         )}
 
-        {/* Name */}
-        <TextField
-          autoFocus
-          fullWidth
-          label="Name"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          margin="normal"
-          required
-        />
+        {/* Name — locations only; boxes are identified by their Box ID */}
+        {kind === 'location' && (
+          <TextField
+            autoFocus
+            fullWidth
+            label="Name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            margin="normal"
+            required
+          />
+        )}
 
         {/* Kind */}
         <Box sx={{ mt: 2 }}>
@@ -264,15 +272,17 @@ const ContainerFormDialog = ({ open, onClose, onSaved, initial, defaultParentId,
           </ToggleButtonGroup>
         </Box>
 
-        {/* Box ID (boxes only) */}
+        {/* Box ID (boxes only) — the box's identity; no separate name field */}
         {kind === 'box' && (
           <TextField
+            autoFocus
             fullWidth
             label="Box ID"
             value={boxId}
             onChange={(e) => setBoxId(e.target.value.toUpperCase())}
             margin="normal"
-            helperText="Optional — must be unique per database. Stored in uppercase."
+            required
+            helperText="Required — unique per database. Stored in uppercase."
           />
         )}
 
@@ -337,7 +347,12 @@ const ContainerFormDialog = ({ open, onClose, onSaved, initial, defaultParentId,
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose}>Cancel</Button>
-        <Button onClick={handleSubmit} variant="contained" startIcon={<SaveIcon />} disabled={saving || !name.trim()}>
+        <Button
+          onClick={handleSubmit}
+          variant="contained"
+          startIcon={<SaveIcon />}
+          disabled={saving || (kind === 'location' ? !name.trim() : !boxId.trim())}
+        >
           {initial ? 'Save Changes' : 'Create'}
         </Button>
       </DialogActions>
@@ -541,7 +556,6 @@ const ContainerListPage = () => {
             <TableRow>
               <TableCell>Name</TableCell>
               <TableCell>Kind</TableCell>
-              <TableCell>Box ID</TableCell>
               <TableCell align="right">Items</TableCell>
               <TableCell align="right">Subtree</TableCell>
               <TableCell align="right"><strong>Actions</strong></TableCell>
@@ -586,8 +600,6 @@ const ContainerListPage = () => {
                         <Chip size="small" icon={<PlaceIcon />} label="Location" />
                       )}
                     </TableCell>
-                    {/* Box ID — boxes only */}
-                    <TableCell>{c.kind === 'box' ? (c.boxId || '(none)') : ''}</TableCell>
                     <TableCell align="right">{c.directItemCount || 0}</TableCell>
                     <Tooltip title="Number of descendant containers">
                       <TableCell align="right">{c.descendantCount || 0}</TableCell>
