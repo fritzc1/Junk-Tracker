@@ -66,7 +66,7 @@ flowchart TD
 - [x] Frontend: remove BOXID suffix rendering in ItemDialog, ItemListPage, ContainerListPage; drop redundant Box ID column from container list table
 - [x] Document revised box/location identity rules + collision rule (and no-migration finding) in `container-tree-and-attributes-plan.md` (decision D7) and this file
 - [x] Verify on spare ports against real data: **18/18 API checks passed** (400s for missing/duplicate IDs, 409 collisions both directions case-insensitive, reclassify loc→box and box→loc with name auto-follow, name ignored on boxes); browser end-to-end verified (create dialog field swap, collision error in-dialog, rename/move dialog, reclassification via UI, table renders without Box ID column or duplicated suffixes); before/after counts identical (134 containers / 574 items) — zero data mutation; all 95 real boxes already satisfy name===boxId so display is unchanged for existing data; spare processes cleaned up
-- [ ] Commit and push as a PR for owner review
+- [x] Committed `0359ef3` and pushed as **PR #21** (https://github.com/fritzc1/Junk-Tracker/pull/21) — awaiting owner review
 
 ## Implementation notes
 
